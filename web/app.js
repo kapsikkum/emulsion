@@ -239,7 +239,9 @@ function pickFolder(title = 'Choose a folder', start = '', { zips = false } = {}
     const { box, close } = layer(html`<header><h2>${title}</h2><button class="btn ghost icon" data-close aria-label="Close">${icon('x')}</button></header>
       <form class="goto"><input class="input mono sm" name="p" placeholder="Paste a path and press Enter" aria-label="Go to path" spellcheck="false"></form>
       <div class="places"></div><div class="crumbs"></div><div class="list"></div>
-      <footer><span class="muted count" style="flex:1"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-pick>Select this folder</button></footer>`, 'modal picker', () => resolve(picked));
+      <footer><span class="muted count" style="flex:1"></span>
+        <form class="newfolder" hidden><input class="input sm" name="n" placeholder="New folder name" aria-label="New folder name"><button class="btn sm">Create</button></form>
+        <button class="btn ghost" data-new>${icon('plus')}New folder</button><button class="btn" data-close>Cancel</button><button class="btn primary" data-pick>Select this folder</button></footer>`, 'modal picker', () => resolve(picked));
     const finish = v => { picked = v; close(); };
     let current = '';
     const load = guard(async p => {
@@ -261,11 +263,28 @@ function pickFolder(title = 'Choose a folder', start = '', { zips = false } = {}
         ${!d.Dirs.length && !zipList.length ? html`<p class="muted" style="padding:10px">No sub-folders${zips ? ' or zips' : ''} here.</p>` : ''}`.s;
       $$('[data-zip]', box).forEach(b => (b.onclick = () => finish(b.dataset.zip)));
       $('.count', box).textContent = d.Path ? (d.Images ? `${plural(d.Images, 'image')} in this folder` : 'No images directly in this folder') : '';
-      $('[data-pick]', box).disabled = !d.Path;
+      $('[data-pick]', box).disabled = $('[data-new]', box).disabled = !d.Path;
       $$('[data-go]', box).forEach(b => (b.onclick = () => load(b.dataset.go)));
       $('.list', box).scrollTop = 0;
     });
     $('[data-pick]', box).onclick = () => finish(current);
+    const nf = $('.newfolder', box);
+    $('[data-new]', box).onclick = () => {
+      nf.hidden = false;
+      $('.count', box).hidden = true;
+      nf.n.focus();
+    };
+    const create = guard(async () => {
+      const name = nf.n.value.trim();
+      if (!name) return;
+      const res = await api('/api/fs/mkdir', { Parent: current, Name: name });
+      nf.hidden = true;
+      nf.n.value = '';
+      $('.count', box).hidden = false;
+      await load(res.Path);
+    });
+    nf.onsubmit = e => { e.preventDefault(); create(); };
+    nf.n.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); create(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); nf.hidden = true; $('.count', box).hidden = false; } };
     const goto = $('.goto input', box);
     $('.goto', box).onsubmit = e => e.preventDefault();
     goto.onkeydown = e => {

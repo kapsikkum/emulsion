@@ -457,3 +457,27 @@ code { font: 12.5px var(--mono); padding: 2px 6px; border-radius: 5px; backgroun
 .picker .goto { padding: 12px 20px 0; }
 .picker .goto .input { margin: 0; }
 input[type="date"].input { min-width: 0; }
+
+/* ---------- welcome ---------- */
+.welcome { max-width: 760px; margin: 0 auto; padding: 56px 0 40px; }
+.welcome-hero { text-align: center; margin-bottom: 36px; }
+.welcome-hero svg { width: 72px; height: 72px; margin: 0 auto 18px; display: block; filter: drop-shadow(0 10px 30px rgba(255, 122, 26, .25)); }
+.welcome-hero h1 { margin: 0; font: 650 38px/1.1 var(--display); letter-spacing: -.03em; }
+.welcome-hero p { margin: 12px auto 0; max-width: 520px; color: var(--muted); font-size: 15.5px; }
+.welcome-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.welcome-step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 16px; padding: 20px 22px; }
+.welcome-step .num { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 700 13px/1 var(--mono); background: var(--panel-3); color: var(--muted); }
+.welcome-step .num svg { width: 16px; height: 16px; }
+.welcome-step.done .num { background: var(--accent); color: var(--accent-ink); }
+.welcome-step h2 { margin: 5px 0 6px; font: 620 16.5px/1.2 var(--display); }
+.welcome-step p { margin: 0 0 14px; color: var(--muted); }
+.welcome-step p:last-child { margin-bottom: 0; }
+.tools { display: grid; gap: 8px; }
+.tool { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tool svg { width: 16px; height: 16px; display: block; }
+.spinner { display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
+.welcome-foot { margin-top: 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 8px; font-size: 13px; text-align: center; }
+.welcome-foot code { overflow-wrap: anywhere; }
+.picker footer { flex-wrap: wrap; }
+.newfolder { display: flex; gap: 6px; flex: 1; min-width: 200px; }
+.newfolder .input { margin: 0; }

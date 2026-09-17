@@ -48,8 +48,22 @@ Build the desktop app with its icon:
 go build -ldflags "-H windowsgui -s -w" -o Emulsion.exe .
 ```
 
-Data (settings, the film database clone, thumbnails, import history and the log) is stored in
-`%AppData%\Emulsion` on Windows. Use `-data <dir>` to put it somewhere else.
+### Where data is kept
+
+Your photos stay where they are, and their metadata lives inside them. Everything else goes in the data
+folder: `%AppData%\Emulsion` on Windows, `~/Library/Application Support/Emulsion` on macOS, and
+`~/.config/Emulsion` on Linux. Pass `-data <dir>` to use a different one.
+
+| Path | What it is |
+| --- | --- |
+| `filmdb/` | Git clone of the Open Source Film Database: `film_database.csv`, box images, and your edits as commits |
+| `settings.json` | Libraries, import templates, hot folder, app paths, remote-access password hash |
+| `library.json` | Cache of the last photo scan, rebuilt from your files |
+| `imported.json` | Names and sizes of imported source files, used to spot duplicates |
+| `thumbs/` | Thumbnail cache, safe to delete |
+| `staging/` | Unpacked zips and browser uploads, cleaned up after a week |
+| `webview/` | Desktop window's browser profile |
+| `emulsion.log` | Log |
 
 ### NAS / server
 

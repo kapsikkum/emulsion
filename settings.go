@@ -10,7 +10,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"time"
 )
@@ -73,10 +72,14 @@ func (st *Store) Get() Settings {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	s := st.s
-	s.Libraries = slices.Clone(s.Libraries)
-	s.ExportDirs = slices.Clone(s.ExportDirs)
-	s.Editors = slices.Clone(s.Editors)
+	// Copies, and never nil: the UI reads these as JSON arrays and objects, and a fresh install has none yet.
+	s.Libraries = append([]string{}, s.Libraries...)
+	s.ExportDirs = append([]string{}, s.ExportDirs...)
+	s.Editors = append([]Editor{}, s.Editors...)
 	s.Apps = maps.Clone(s.Apps)
+	if s.Apps == nil {
+		s.Apps = map[string]string{}
+	}
 	return s
 }
 

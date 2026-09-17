@@ -45,22 +45,7 @@ views.library = async (main, _, __, alive) => {
   if (!alive()) return;
   S.onState = ({ scanDone, jobDone }) => { if (scanDone || jobDone) route(); };
 
-  if (!settings.libraries.length) {
-    main.innerHTML = html`${pageHead('Library')}<div class="empty card">
-      ${icon('folder', 'big')}<h2>Point Emulsion at your scans</h2>
-      <p>Pick the folder where your film scans live. Each sub-folder is treated as one roll. Nothing is moved or copied.</p>
-      <div class="row" style="justify-content:center"><button class="btn primary" data-add>${icon('plus')}Add photo folder</button><a class="btn" href="#/import">${icon('import')}Import a roll</a></div>
-    </div>`.s;
-    $('[data-add]', main).onclick = guard(async () => {
-      const p = await pickFolder('Choose your scans folder');
-      if (!p) return;
-      await api('/api/settings', { Libraries: [p], ImportTo: p, UpdateHours: settings.updateHours });
-      await refreshState();
-      toast('Folder added — scanning your photos');
-      route();
-    });
-    return;
-  }
+  if (!settings.libraries.length) return welcome(main, alive);
   if (!all.length) {
     const scanning = S.state.library.status.startsWith('Scanning');
     main.innerHTML = html`${pageHead('Library')}<div class="empty card">
@@ -120,6 +105,54 @@ views.library = async (main, _, __, alive) => {
   $('[data-rescan]', main).onclick = guard(async () => { await api('/api/rescan', {}); toast('Rescanning library…'); });
   draw();
 };
+
+// ---------- first launch ----------
+async function welcome(main, alive) {
+  let films = 0;
+  const draw = () => {
+    const st = S.state, db = st.filmdb, deps = st.deps;
+    const dbReady = db.status === 'Up to date' && films > 0;
+    const step = (n, done, title, body) => html`<li class="card welcome-step ${done ? 'done' : ''}">
+      <div class="num">${done ? icon('check') : n}</div><div><h2>${title}</h2>${body}</div></li>`;
+    const tool = (ok, name, cmd) => html`<div class="tool">${ok ? html`<span class="ok">${icon('check')}</span>` : html`<span class="err">${icon('x')}</span>`}
+      <b>${name}</b>${ok ? html`<span class="muted">found</span>` : html`<code>${cmd}</code>`}</div>`;
+    main.innerHTML = html`<div class="welcome">
+      <header class="welcome-hero">${LOGO}<h1>Welcome to Emulsion</h1>
+        <p>Your film rolls, tagged with the stock and camera they were shot on, alongside a library of more than 8,000 films.</p></header>
+      <ol class="welcome-steps">
+        ${step(1, false, 'Choose where your scans live', html`<p>Pick the folder that holds your scans, where each sub-folder is one roll. Or create an empty folder to import lab zips and cards into. Nothing gets moved.</p>
+          <div class="row"><button class="btn primary" data-add>${icon('folder')}Choose folder</button></div>`)}
+        ${step(2, dbReady, 'Film database', html`<p>${dbReady ? `${films.toLocaleString()} films downloaded from the Open Source Film Database. Emulsion checks for updates daily.`
+          : /fail/i.test(db.status) ? html`<span class="err">${db.status}</span>` : html`<span class="spinner"></span>${db.status || 'Starting…'}`}</p>`)}
+        ${step(3, deps.git && deps.exiftool, 'Helper tools', html`<p>Git keeps the film database up to date and ExifTool writes metadata into your photos.</p>
+          <div class="tools">${tool(deps.git, 'Git', st.os === 'windows' ? 'winget install Git.Git' : 'install git')}${tool(deps.exiftool, 'ExifTool', st.os === 'windows' ? 'winget install OliverBetz.ExifTool' : 'install exiftool')}</div>
+          ${deps.git && deps.exiftool ? '' : html`<p class="faint" style="margin:10px 0 0">Install what's missing, then restart Emulsion.</p>`}`)}
+      </ol>
+      <footer class="welcome-foot"><span class="muted">Settings, the film database and thumbnails are kept in</span> <code>${st.dataDir}</code>
+        ${st.desktop ? html`<button class="btn sm ghost" data-datadir>${icon('external')}Open folder</button>` : ''}</footer>
+    </div>`.s;
+    $('[data-add]', main).onclick = guard(async () => {
+      const p = await pickFolder('Choose your scans folder');
+      if (!p) return;
+      await api('/api/settings', { Libraries: [p], ImportTo: p, UpdateHours: st.settings.updateHours });
+      await refreshState();
+      toast('Folder added. Scanning your photos…');
+      route();
+    });
+    $('[data-datadir]', main)?.addEventListener('click', guard(() => api('/api/open', { App: 'data' })));
+  };
+  const countFilms = async () => { films = (await api('/api/films?limit=1').catch(() => ({ total: 0 }))).total || 0; };
+  await countFilms();
+  if (!alive()) return;
+  let lastStatus = S.state.filmdb.status;
+  S.onState = async () => {
+    if (S.state.filmdb.status === lastStatus) return;
+    lastStatus = S.state.filmdb.status;
+    await countFilms();
+    if (alive() && !$('.overlay')) draw();
+  };
+  draw();
+}
 
 // ---------- roll ----------
 const rollView = { tab: 'positives' };

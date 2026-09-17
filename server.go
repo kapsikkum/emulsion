@@ -182,6 +182,14 @@ func (a *App) Handler(local bool) http.Handler {
 			fail(w, 403, errors.New("apps can only be opened from the desktop app"))
 			return
 		}
+		if req.App == "data" {
+			if err := reveal(a.DataDir, nil); err != nil {
+				fail(w, 500, err)
+				return
+			}
+			writeJSON(w, map[string]bool{"ok": true})
+			return
+		}
 		if a.lib.Roll(req.Dir) == nil {
 			fail(w, 404, errors.New("roll not found"))
 			return
@@ -218,6 +226,29 @@ func (a *App) Handler(local bool) http.Handler {
 		writeJSON(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /api/fs", a.browse)
+	mux.HandleFunc("POST /api/fs/mkdir", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Parent, Name string }
+		if err := readJSON(r, &req); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" || safeSegment(name) != name {
+			fail(w, 400, errors.New(`folder names can't contain < > : " / \ | ? * or start or end with a dot`))
+			return
+		}
+		parent := filepath.Clean(filepath.FromSlash(req.Parent))
+		if st, err := os.Stat(parent); err != nil || !st.IsDir() || !filepath.IsAbs(parent) {
+			fail(w, 400, errors.New("open a folder first"))
+			return
+		}
+		p := filepath.Join(parent, name)
+		if err := os.Mkdir(p, 0o755); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, map[string]string{"Path": filepath.ToSlash(p)})
+	})
 	mux.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) { a.saveSettings(w, r, local) })
 	mux.HandleFunc("GET /api/thumb", a.thumb)
 	mux.HandleFunc("GET /api/photo", func(w http.ResponseWriter, r *http.Request) {

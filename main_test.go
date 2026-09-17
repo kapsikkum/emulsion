@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io/fs"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -234,6 +235,26 @@ func TestHotFolder(t *testing.T) {
 	for _, p := range []string{filepath.Join(lib, "Lab order 77", "a.jpg"), filepath.Join(hot, "Imported", "Lab order 77.zip")} {
 		if _, err := os.Stat(p); err != nil {
 			t.Error(err)
+		}
+	}
+}
+
+// A fresh install has no settings file; the UI must still get arrays, not null (it crashed on first launch).
+func TestFreshStateHasEmptyLists(t *testing.T) {
+	a := NewApp(t.TempDir(), true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	req.Host = "127.0.0.1:1234"
+	a.Handler(true).ServeHTTP(rec, req)
+	var out struct {
+		Settings map[string]any
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err, rec.Body.String())
+	}
+	for _, k := range []string{"libraries", "exportDirs", "editors", "apps"} {
+		if out.Settings[k] == nil {
+			t.Errorf("%s is null in %s", k, rec.Body.String())
 		}
 	}
 }
