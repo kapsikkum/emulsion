@@ -17,11 +17,17 @@ the way qBittorrent does. The desktop app can also turn on a password-protected 
 - **Lightroom-style import.** Import from a folder, a memory card or a lab `.zip`. You can also upload from
   the browser or drop files onto the page. Pick frames, skip duplicates, and choose copy, move or add in place.
   A folder template such as `{yyyy}/{date} {name}` files the rolls, with optional renaming (`{name}_{seq}`).
-  Metadata is applied on the way in. Lab zips with several roll folders become several rolls.
+  Metadata is applied on the way in. Lab zips with several roll folders become several rolls, each with its own
+  editable name, film, ISO and date. Emulsion suggests tidy names ("Roll 1 - Portra 400" becomes "Portra 400")
+  and guesses the film from the folder name. You choose the naming style.
 - **Hot folder.** Save lab zips into a watched folder and they import on their own. The zips are then moved
   to `Imported/`.
 - **Film database.** The database is a git clone. Your edits are local commits, and updates are
   `git pull` with your edits kept. You can see and revert your edits in Settings.
+- **Updates.** Emulsion checks GitHub daily for a new release and shows it in the sidebar. **Install and restart**
+  downloads the build for your platform, verifies it against the release's `SHA256SUMS.txt`, replaces the
+  program and restarts. The previous version is kept as `Emulsion.exe.old` until the next start. You can turn
+  off daily checks in Settings. Docker installs update by pulling the new image.
 - **Open in.** Opens a roll in Lightroom Classic, Photoshop, NegPy or your own editors. Emulsion finds
   common installs, and you can override paths in Settings.
 - **NegPy.** Set NegPy's export to a sub-folder of the source called `export` and turn on copying metadata.

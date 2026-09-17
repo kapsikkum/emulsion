@@ -258,3 +258,62 @@ func TestFreshStateHasEmptyLists(t *testing.T) {
 		}
 	}
 }
+
+func TestTidyName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Roll 1 - Portra 400":  "Portra 400",
+		"roll_03_-_Portra_400": "Portra 400",
+		"#12 Lisbon":           "Lisbon",
+		"03. Beach day":        "Beach day",
+		"2024-05 Lisbon":       "2024-05 Lisbon", // dates are kept
+		"00012345":             "00012345",       // nothing left after tidying: keep the original
+		"Order 48213":          "Order 48213",
+	} {
+		if got := tidyName(in); got != want {
+			t.Errorf("tidyName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGuessFilm(t *testing.T) {
+	lines := []string{"h;h;Name", ";;Kodak Portra 400 (new)", ";;Kodak Professional Portra 400 VC", ";;Ilford HP5 PLUS 400 HP5+ (black box)", ";;Ilford HP5", ";;Fujicolor Daylight 100"}
+	for folder, want := range map[string]string{
+		"Roll 1 - Portra 400": "Kodak Portra 400 (new)",
+		"Roll 2 - HP5":        "Ilford HP5",
+		"Beach day":           "",
+		"Roll 3":              "",
+	} {
+		if got := guessFilm(lines, folder); got != want {
+			t.Errorf("guessFilm(%q) = %q, want %q", folder, got, want)
+		}
+	}
+}
+
+func TestPlanPerRollOverrides(t *testing.T) {
+	root := t.TempDir()
+	lib := filepath.Join(root, "lib")
+	os.MkdirAll(lib, 0o755)
+	a := NewApp(filepath.Join(root, "data"), false)
+	a.settings.Update(func(s *Settings) { s.Libraries = []string{filepath.ToSlash(lib)} })
+	src := &ImportSource{Name: "Order 1", Files: []ImportFile{
+		{Rel: "Roll 1 - Portra 400/1.jpg", Group: "Roll 1 - Portra 400", Date: "2026-05-03"},
+		{Rel: "Roll 2 - HP5/1.jpg", Group: "Roll 2 - HP5", Date: "2026-05-04"},
+	}}
+	req := ImportRequest{Mode: "copy", Dest: filepath.ToSlash(lib), Structure: "{yyyy}/{film}/{name}", Split: true, Meta: Meta{Make: "Nikon", Film: "Default film"},
+		Rolls: []RollOverride{{Group: "Roll 1 - Portra 400", Name: "Lisbon", Meta: Meta{Film: "Kodak Portra 400", Date: "2025-12-31"}}}}
+	plans, err := a.PlanImport(req, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plans[0].Dir != filepath.Join(lib, "2025", "Kodak Portra 400", "Lisbon") || plans[0].Meta.Make != "Nikon" {
+		t.Errorf("roll 1: %+v", plans[0])
+	}
+	if plans[1].Dir != filepath.Join(lib, "2026", "Default film", "HP5") || plans[1].Meta.Film != "Default film" {
+		t.Errorf("roll 2 should get the tidied name and the default film: %+v", plans[1])
+	}
+	req.Rolls = []RollOverride{{Group: "Roll 1 - Portra 400", Name: "Same"}, {Group: "Roll 2 - HP5", Name: "same"}}
+	req.Structure = "{name}"
+	if _, err := a.PlanImport(req, src); err == nil {
+		t.Error("two rolls in one folder should be refused")
+	}
+}

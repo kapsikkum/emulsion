@@ -105,9 +105,11 @@ views.settings = async (main, _, __, alive) => {
         </form></section>`
       : !st.local && w.hasPassword ? html`<section class="card"><div class="section"><h2>Session</h2><p class="muted">You’re signed in remotely.</p><button class="btn" data-logout>${icon('logout')}Sign out</button></div></section>` : ''}
 
+      <section class="card" id="updates"><div class="section" data-updates><h2>Updates</h2><p class="muted">Checking…</p></div></section>
+
       <section class="card"><div class="section">
         <h2>System</h2>
-        <dl class="kv"><dt>Version</dt><dd class="mono">${st.version}</dd>
+        <dl class="kv">
           ${dep(st.deps.git, 'Git', st.os === 'windows' ? 'winget install Git.Git' : 'apt install git')}
           ${dep(st.deps.exiftool, 'ExifTool', st.os === 'windows' ? 'winget install OliverBetz.ExifTool' : 'apt install libimage-exiftool-perl')}
           <dt>Data folder</dt><dd class="mono" style="overflow-wrap:anywhere">${st.dataDir}</dd></dl>
@@ -183,6 +185,68 @@ views.settings = async (main, _, __, alive) => {
     e.preventDefault();
     save({ WebUI: { Enabled: remote.enabled.checked, Address: remote.address.value.trim(), Password: remote.password.value } }, 'Remote access saved');
   };
+  // ---------- updates ----------
+  const upBox = $('[data-updates]', main);
+  let upTimer;
+  const drawUpdates = u => {
+    const auto = st.settings.autoUpdateCheck;
+    upBox.innerHTML = html`<h2>Updates</h2>
+      <dl class="kv"><dt>Installed</dt><dd class="mono">${u.Current}</dd>
+        <dt>Latest release</dt><dd class="mono">${u.Latest || '—'}${u.URL ? html` <a class="muted" href="${u.URL}" target="_blank" rel="noopener" style="text-decoration:underline;font-family:var(--sans)">release notes</a>` : ''}</dd>
+        <dt>Last checked</dt><dd>${u.Checking ? 'checking…' : ago(u.Checked)}</dd></dl>
+      ${u.Error ? html`<div class="note warn" style="margin-top:14px">${u.Error}</div>` : ''}
+      ${u.Available ? html`<div class="note update-note" style="margin-top:14px"><b>Emulsion ${u.Latest} is available.</b>
+          ${u.Notes ? html`<div class="notes">${u.Notes}</div>` : ''}
+          ${u.Installing ? html`<div class="row" style="justify-content:space-between;margin-top:12px"><span>${u.Progress < 100 ? 'Downloading…' : 'Installing…'}</span><span class="mono">${u.Progress}%</span></div><div class="progress" style="margin-top:6px"><i style="width:${u.Progress}%"></i></div>`
+            : u.CanInstall ? '' : html`<p style="margin:10px 0 0">${u.Reason}</p>`}</div>`
+        : u.Latest && !u.Checking ? html`<p class="ok" style="margin:14px 0 0">${icon('check')} You're on the latest version.</p>` : ''}
+      <div class="row" style="margin-top:16px">
+        ${u.Available && u.CanInstall ? html`<button class="btn primary" data-install ${u.Installing ? 'disabled' : ''}>${icon('import')}Install and restart</button>` : ''}
+        <button class="btn" data-check ${u.Checking || u.Installing ? 'disabled' : ''}>${icon('refresh')}Check now</button>
+        <label class="switch" style="margin-left:auto"><input type="checkbox" data-autocheck ${auto ? 'checked' : ''}><i></i><span class="muted">Check daily</span></label>
+      </div>`.s;
+    $('[data-check]', upBox).onclick = guard(async () => { drawUpdates({ ...u, Checking: true }); drawUpdates(await api('/api/update/check', {})); await refreshState(); });
+    $('[data-autocheck]', upBox).onchange = e => save({ AutoUpdateCheck: e.target.checked }, e.target.checked ? 'Emulsion will check for updates daily' : 'Automatic update checks off');
+    $('[data-install]', upBox)?.addEventListener('click', guard(async () => {
+      if (!confirm(`Install Emulsion ${u.Latest} and restart? The current version is kept as a backup.`)) return;
+      await api('/api/update/install', {});
+      watchInstall();
+    }));
+  };
+  // Poll while installing; when the server restarts on the new version, reload the page.
+  const watchInstall = async () => {
+    clearTimeout(upTimer);
+    let u;
+    try {
+      u = await api('/api/update');
+    } catch {
+      return restarting();
+    }
+    if (!alive()) return;
+    drawUpdates(u);
+    if (u.Installing) upTimer = setTimeout(watchInstall, 700);
+  };
+  const restarting = () => {
+    const from = st.version;
+    document.body.insertAdjacentHTML('beforeend', html`<div class="restart-veil">${LOGO}<b>Restarting Emulsion…</b><span>This page reloads when the new version is up.</span></div>`.s);
+    const wait = async () => {
+      try {
+        const s = await fetch('/api/state').then(r => r.json());
+        if (s.version && s.version !== from) return location.reload();
+      } catch { /* still restarting */ }
+      setTimeout(wait, 1000);
+    };
+    setTimeout(wait, 1500);
+  };
+  api('/api/update').then(u => {
+    if (!alive()) return;
+    drawUpdates(u);
+    if (u.Installing) watchInstall();
+    else if (!u.Checked || new Date(u.Checked).getFullYear() < 2000) $('[data-check]', upBox)?.click();
+  }).catch(e => { upBox.innerHTML = html`<h2>Updates</h2><p class="err">${e.message}</p>`.s; });
+  // After the router restores scroll position for this page.
+  if (location.hash === '#/settings/updates') setTimeout(() => $('#updates', main)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+
   S.onState = () => {
     const el = $('[data-dbstatus]', main);
     if (el && el.textContent !== (S.state.filmdb.status || '—')) el.textContent = S.state.filmdb.status || '—';

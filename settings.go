@@ -18,7 +18,9 @@ type Settings struct {
 	Libraries   []string `json:"libraries"`
 	ImportTo    string   `json:"importTo"`
 	UpdateHours int      `json:"updateHours"`
-	WebUI       WebUI    `json:"webui"`
+	// NoUpdateCheck turns off the daily check for new Emulsion releases.
+	NoUpdateCheck bool  `json:"noUpdateCheck,omitempty"`
+	WebUI         WebUI `json:"webui"`
 
 	Structure  string            `json:"structure"`  // import folder template, e.g. "{yyyy}/{date} {name}"
 	Rename     string            `json:"rename"`     // import file name template; "" keeps original names

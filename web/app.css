@@ -481,3 +481,24 @@ input[type="date"].input { min-width: 0; }
 .picker footer { flex-wrap: wrap; }
 .newfolder { display: flex; gap: 6px; flex: 1; min-width: 200px; }
 .newfolder .input { margin: 0; }
+
+/* ---------- per-roll import rows ---------- */
+.imp-rolls { display: grid; gap: 10px; }
+.imp-roll { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.imp-roll-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 11.5px; }
+.imp-roll-head .mono { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.imp-roll-head svg { width: 13px; height: 13px; color: var(--accent); flex: none; }
+.imp-roll .input { height: 34px; font-size: 13px; }
+.imp-roll-meta { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px; }
+.imp-roll-film { grid-column: 1 / -1; min-width: 0; }
+
+/* ---------- updates ---------- */
+.status-link { color: inherit; border-radius: 6px; }
+.status-link:hover .value { color: var(--text); }
+.status-link .value { color: var(--accent); }
+.update-note .notes { margin-top: 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 12.5px; color: var(--muted); }
+.ok svg, .err svg { width: 15px; height: 15px; vertical-align: -3px; }
+.restart-veil { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; justify-items: center; gap: 10px; background: rgba(13, 12, 11, .94); text-align: center; }
+.restart-veil svg { width: 56px; height: 56px; animation: pulse 1.4s ease-in-out infinite; }
+.restart-veil b { font: 620 20px/1.2 var(--display); }
+.restart-veil span { color: var(--muted); }

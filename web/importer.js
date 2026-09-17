@@ -16,7 +16,15 @@ const RENAMES = [
   ['{name}_{original}', 'Roll name_original'],
 ];
 
+const ROLL_STYLES = [
+  ['tidy', 'Tidied folder name', g => g.Name],
+  // Skips the date when the folder structure already adds one, so folders don't read "2026-05-03 2026-05-03 Portra".
+  ['dated', 'Date + tidied name', (g, r) => (/\{date\}/.test(imp.structure) ? g.Name : `${r.Date || g.Date} ${g.Name}`)],
+  ['folder', 'Folder name as-is', g => g.Folder],
+];
+
 const imp = {
+  rollStyle: 'tidy', rolls: {},
   source: '', src: null, sub: true, selected: new Set(), hideDups: false, uploads: [],
   mode: 'copy', dest: '', structure: null, rename: null, split: false,
   name: '', nameTouched: false, Film: '', ISO: '', Make: '', Model: '', Lens: '', Date: '', after: '',
@@ -96,7 +104,12 @@ views.import = async (main, _, query, alive) => {
     imp.selected = new Set(imp.src.Files.filter(f => !f.Dup).map(f => f.Rel));
     if (!imp.nameTouched) imp.name = imp.src.Name;
     if (imp.src.Zip && imp.mode === 'add') imp.mode = 'copy';
-    if (path !== imp.lastSource) imp.split = new Set(imp.src.Files.map(f => f.Group)).size > 1; // lab zips: one roll per folder
+    if (path !== imp.lastSource) {
+      imp.split = new Set(imp.src.Files.map(f => f.Group)).size > 1; // lab zips: one roll per folder
+      // Suggested name and film per roll; the user can change any of them.
+      imp.rolls = Object.fromEntries((imp.src.Groups || []).map(g => [g.Group, { name: '', nameTouched: false, Film: g.Film || '', ISO: g.ISO || '', Date: '' }]));
+      nameRolls();
+    }
     imp.lastSource = path;
     drawSource();
     drawCenter();
@@ -193,10 +206,20 @@ views.import = async (main, _, query, alive) => {
   };
 
   // ---------- destination ----------
+  const groupInfo = group => (imp.src?.Groups || []).find(g => g.Group === group);
+  const nameRolls = () => {
+    const style = ROLL_STYLES.find(([id]) => id === imp.rollStyle) || ROLL_STYLES[0];
+    for (const [group, r] of Object.entries(imp.rolls)) {
+      const g = groupInfo(group);
+      if (g && !r.nameTouched) r.name = style[2](g, r);
+    }
+  };
+  const selectedGroups = () => (imp.src?.Groups || []).filter(g => imp.src.Files.some(f => f.Group === g.Group && imp.selected.has(f.Rel)));
   const multiGroup = () => imp.src && new Set(imp.src.Files.filter(f => imp.selected.has(f.Rel)).map(f => f.Group)).size > 1;
   const request = () => ({
     Source: imp.source, Subfolders: imp.sub, Files: [...imp.selected], Mode: imp.mode, Dest: imp.dest,
     Structure: imp.structure, Rename: imp.rename, Split: imp.split && multiGroup(), Name: imp.name,
+    Rolls: imp.split && multiGroup() ? selectedGroups().map(g => ({ Group: g.Group, Name: imp.rolls[g.Group]?.name || '', Film: imp.rolls[g.Group]?.Film || '', ISO: imp.rolls[g.Group]?.ISO || '', Date: imp.rolls[g.Group]?.Date || '' })) : [],
     Film: imp.Film, ISO: imp.ISO, Make: imp.Make, Model: imp.Model, Lens: imp.Lens, Date: imp.Date, After: imp.after,
   });
 
@@ -205,6 +228,7 @@ views.import = async (main, _, query, alive) => {
     const running = S.state.library.job.Running;
     const custom = !STRUCTURES.some(([v]) => v === imp.structure);
     const customRename = !RENAMES.some(([v]) => v === imp.rename);
+    const splitting = imp.mode !== 'add' && imp.split && multiGroup();
     $dest.innerHTML = html`<form data-form>
       <h2>File handling</h2>
       <div class="seg full" role="radiogroup">${[['copy', 'Copy'], ['move', 'Move'], ['add', 'Add']].map(([v, l]) => html`
@@ -219,7 +243,22 @@ views.import = async (main, _, query, alive) => {
           <option value="custom" ${custom ? 'selected' : ''}>Custom…</option></select></label>
         ${custom ? html`<label class="field"><span>Folder template</span><input class="input mono" name="structure" value="${imp.structure}"><small>{name} {film} {camera} {make} {model} {iso} {yyyy} {yy} {mm} {dd} {date} {source}</small></label>` : ''}
         ${multiGroup() ? html`<label class="switch"><input type="checkbox" name="split" ${imp.split ? 'checked' : ''}><i></i><span>One roll per sub-folder</span></label>` : ''}
-        <label class="field"><span>Roll name</span><input class="input" name="name" value="${imp.name}" placeholder="e.g. Lisbon trip"></label>
+        ${splitting ? html`<label class="field"><span>Name rolls by</span><select class="input" name="rollStyle">
+            ${ROLL_STYLES.map(([id, label]) => html`<option value="${id}" ${id === imp.rollStyle ? 'selected' : ''}>${label}</option>`)}</select>
+            <small>Pre-fills the names below. Anything you type yourself is kept.</small></label>
+          <div class="imp-rolls">${selectedGroups().map(g => {
+            const r = imp.rolls[g.Group] || {};
+            const key = `r|${g.Group}|`;
+            return html`<div class="imp-roll">
+              <div class="imp-roll-head"><span class="mono" title="${g.Group}">${icon('folder')}${g.Folder}</span><span class="muted nowrap">${plural(g.Count, 'photo')}</span></div>
+              <input class="input" name="${key}name" value="${r.name}" placeholder="${g.Name}" aria-label="Roll name for ${g.Folder}">
+              <div class="imp-roll-meta">
+                <div class="imp-roll-film"><input class="input" name="${key}Film" value="${r.Film}" placeholder="${imp.Film || 'Film stock'}" aria-label="Film for ${g.Folder}"></div>
+                <input class="input" name="${key}ISO" value="${r.ISO}" placeholder="${imp.ISO || 'ISO'}" inputmode="numeric" aria-label="ISO for ${g.Folder}">
+                <input class="input" type="date" name="${key}Date" value="${r.Date}" aria-label="Date shot for ${g.Folder}">
+              </div></div>`;
+          })}</div>`
+        : html`<label class="field"><span>Roll name</span><input class="input" name="name" value="${imp.name}" placeholder="e.g. Lisbon trip"></label>`}
         <div class="plan" data-plan></div>
 
         <h2>File names</h2>
@@ -229,7 +268,8 @@ views.import = async (main, _, query, alive) => {
         ${customRename ? html`<label class="field"><span>Name template</span><input class="input mono" name="rename" value="${imp.rename}"><small>{original} {seq} plus any folder token</small></label>` : ''}` : ''}
 
       <h2>Apply metadata</h2>
-      <label class="field"><span>Film stock</span><input class="input" name="Film" value="${imp.Film}" placeholder="Search the film database"></label>
+      <label class="field"><span>${splitting ? 'Default film stock' : 'Film stock'}</span><input class="input" name="Film" value="${imp.Film}" placeholder="Search the film database">
+        ${splitting ? html`<small>For rolls that don't have their own film above. ISO, date, camera and lens work the same way.</small>` : ''}</label>
       <div class="fields two">
         <label class="field"><span>ISO</span><input class="input" name="ISO" inputmode="numeric" value="${imp.ISO}"></label>
         <label class="field"><span>Date shot</span><input class="input" type="date" name="Date" value="${imp.Date}"></label>
@@ -251,15 +291,40 @@ views.import = async (main, _, query, alive) => {
     </form>`.s;
 
     const form = $('[data-form]', $dest);
-    if (focused && form[focused]) { form[focused].focus(); const v = form[focused].value; if (form[focused].setSelectionRange && form[focused].type === 'text') form[focused].setSelectionRange(v.length, v.length); }
+    const refocus = focused && form.elements.namedItem(focused);
+    if (refocus) {
+      refocus.focus();
+      if (refocus.setSelectionRange && refocus.type === 'text') refocus.setSelectionRange(refocus.value.length, refocus.value.length);
+    }
     filmPicker(form.Film, f => { imp.Film = f.Name; if (f.ISO) { imp.ISO = f.ISO; form.ISO.value = f.ISO; } plan(); });
+    $$('input[name$="|Film"]', form).forEach(input => {
+      const group = input.name.split('|')[1];
+      filmPicker(input, f => {
+        imp.rolls[group].Film = f.Name;
+        if (f.ISO) { imp.rolls[group].ISO = f.ISO; form[`r|${group}|ISO`].value = f.ISO; }
+        plan();
+      });
+    });
     $$('[data-mode]', form).forEach(b => (b.onclick = () => { imp.mode = b.dataset.mode; drawDest(); }));
     form.onsubmit = e => e.preventDefault();
     form.oninput = e => {
       const t = e.target;
-      if (t.name === 'structurePreset') { imp.structure = t.value === 'custom' ? imp.structure + ' ' : t.value; return drawDest(); }
+      if (t.name === 'structurePreset') { imp.structure = t.value === 'custom' ? imp.structure + ' ' : t.value; nameRolls(); return drawDest(); }
       if (t.name === 'renamePreset') { imp.rename = t.value === 'custom' ? '{original}' : t.value; return drawDest(); }
-      if (t.name === 'split') { imp.split = t.checked; return plan(); }
+      if (t.name === 'split') { imp.split = t.checked; return drawDest(); }
+      if (t.name === 'rollStyle') { imp.rollStyle = t.value; nameRolls(); return drawDest(); }
+      if (t.name?.startsWith('r|')) {
+        const [, group, field] = t.name.split('|');
+        const r = imp.rolls[group];
+        if (!r) return;
+        r[field] = t.value;
+        if (field === 'name') r.nameTouched = t.value.trim() !== '';
+        if (field === 'Date' && !r.nameTouched) {
+          nameRolls();
+          form[`r|${group}|name`].value = r.name;
+        }
+        return plan();
+      }
       if (t.name === 'name') imp.nameTouched = true;
       if (['dest', 'structure', 'rename', 'name', 'Film', 'ISO', 'Make', 'Model', 'Lens', 'Date', 'after'].includes(t.name)) imp[t.name] = t.value;
       plan();

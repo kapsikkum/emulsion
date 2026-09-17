@@ -34,6 +34,7 @@ type App struct {
 	db       *FilmDB
 	lib      *Library
 	thumbs   *Thumbs
+	updater  *Updater
 	sessions Sessions
 	loginMu  sync.Mutex
 
@@ -45,14 +46,23 @@ type App struct {
 func NewApp(dataDir string, desktop bool) *App {
 	os.MkdirAll(dataDir, 0o755)
 	settings := LoadSettings(dataDir)
-	return &App{
+	a := &App{
 		DataDir:  dataDir,
 		Desktop:  desktop,
 		settings: settings,
 		db:       &FilmDB{Dir: filepath.Join(dataDir, "filmdb")},
 		lib:      NewLibrary(dataDir, func() []string { return settings.Get().ExportDirs }),
 		thumbs:   NewThumbs(filepath.Join(dataDir, "thumbs")),
+		updater:  NewUpdater(),
 	}
+	a.updater.beforeRestart = func() {
+		a.remoteMu.Lock()
+		defer a.remoteMu.Unlock()
+		if a.remote != nil {
+			a.remote.Close()
+		}
+	}
+	return a
 }
 
 // Background: film DB sync on start and every UpdateHours; library scan on start.
@@ -60,6 +70,18 @@ func (a *App) Start() {
 	go a.lib.Scan(a.settings.Get().Libraries)
 	go a.CleanStaging()
 	go a.HotFolderLoop()
+	go CleanOld()
+	go func() {
+		time.Sleep(30 * time.Second) // don't slow down startup
+		for {
+			if !a.settings.Get().NoUpdateCheck {
+				if info := a.updater.Check(); info.Available {
+					logf("update available: %s", info.Latest)
+				}
+			}
+			time.Sleep(24 * time.Hour)
+		}
+	}()
 	go func() {
 		for {
 			if _, last := a.db.Status(); time.Since(last) >= time.Duration(max(1, a.settings.Get().UpdateHours))*time.Hour {
@@ -138,7 +160,7 @@ func (a *App) Handler(local bool) http.Handler {
 			if plans, err = a.PlanImport(req, src); err == nil {
 				out := []map[string]any{}
 				for _, p := range plans {
-					out = append(out, map[string]any{"Name": p.Name, "Dir": filepath.ToSlash(p.Dir), "Count": len(p.Files)})
+					out = append(out, map[string]any{"Name": p.Name, "Dir": filepath.ToSlash(p.Dir), "Count": len(p.Files), "Film": p.Meta.Film})
 				}
 				writeJSON(w, out)
 				return
@@ -220,6 +242,15 @@ func (a *App) Handler(local bool) http.Handler {
 			return
 		}
 		if err := a.db.Revert(req.Hash); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.updater.Info()) })
+	mux.HandleFunc("POST /api/update/check", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.updater.Check()) })
+	mux.HandleFunc("POST /api/update/install", func(w http.ResponseWriter, r *http.Request) {
+		if err := a.updater.Start(); err != nil {
 			fail(w, 400, err)
 			return
 		}
@@ -348,13 +379,17 @@ func (a *App) state(w http.ResponseWriter, r *http.Request, local bool) {
 	out["deps"] = map[string]bool{"git": gitErr == nil, "exiftool": exifErr == nil}
 	out["settings"] = map[string]any{
 		"libraries": s.Libraries, "importTo": s.ImportTo, "updateHours": s.UpdateHours,
-		"structure": s.Structure, "rename": s.Rename, "exportDirs": s.ExportDirs, "hotFolder": s.HotFolder, "editors": s.Editors, "apps": s.Apps,
+		"autoUpdateCheck": !s.NoUpdateCheck,
+		"structure":       s.Structure, "rename": s.Rename, "exportDirs": s.ExportDirs, "hotFolder": s.HotFolder, "editors": s.Editors, "apps": s.Apps,
 		"webui": map[string]any{"enabled": s.WebUI.Enabled, "address": s.WebUI.Address, "hasPassword": s.WebUI.PasswordHash != "",
 			"running": remoteRunning, "error": remoteErr, "urls": lanURLs(s.WebUI.Address)},
 	}
 	out["os"] = runtime.GOOS
 	out["dataDir"] = filepath.ToSlash(a.DataDir)
 	out["version"] = version
+	up := a.updater.Info()
+	out["update"] = map[string]any{"available": up.Available, "latest": up.Latest, "installing": up.Installing}
+	out["updatedFrom"] = os.Getenv("EMULSION_UPDATED_FROM")
 	writeJSON(w, out)
 }
 
@@ -647,6 +682,7 @@ func (a *App) saveSettings(w http.ResponseWriter, r *http.Request, local bool) {
 			Address  string
 			Password string
 		}
+		AutoUpdateCheck   *bool
 		Structure, Rename *string
 		ExportDirs        *[]string
 		HotFolder         *HotFolder
@@ -712,6 +748,9 @@ func (a *App) saveSettings(w http.ResponseWriter, r *http.Request, local bool) {
 	oldLibs := a.settings.Get().Libraries
 	err := a.settings.Update(func(s *Settings) {
 		s.Libraries, s.ImportTo, s.UpdateHours = libs, importTo, max(1, req.UpdateHours)
+		if req.AutoUpdateCheck != nil {
+			s.NoUpdateCheck = !*req.AutoUpdateCheck
+		}
 		if req.Structure != nil {
 			s.Structure = *req.Structure
 		}
@@ -796,7 +835,12 @@ func (a *App) ApplyRemote() {
 	if !s.Enabled {
 		return
 	}
+	// After an update restart the old process may still hold the port for a moment.
 	ln, err := net.Listen("tcp", s.Address)
+	for i := 0; err != nil && i < 20 && os.Getenv("EMULSION_UPDATED_FROM") != ""; i++ {
+		time.Sleep(500 * time.Millisecond)
+		ln, err = net.Listen("tcp", s.Address)
+	}
 	if err != nil {
 		a.remoteErr = err.Error()
 		return

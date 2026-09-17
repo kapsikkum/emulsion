@@ -167,7 +167,9 @@ function renderStatus() {
   const { library: lib, filmdb: db } = S.state;
   const dot = s => /fail|not installed|error/i.test(s) ? 'err' : /…/.test(s) ? 'busy' : 'ok';
   const job = lib.job;
+  const up = S.state.update || {};
   box.innerHTML = html`
+    ${up.available ? html`<a class="row status-link" href="#/settings/updates"><i class="dot busy"></i><div><div class="label">Update</div><div class="value">${up.installing ? `Installing ${up.latest}…` : `Emulsion ${up.latest} is available`}</div></div></a>` : ''}
     ${job.Running ? html`<div class="row"><i class="dot busy"></i><div><div class="label">Import</div><div class="value">${job.Message} · ${job.Done}/${job.Total}</div><div class="progress" style="margin-top:6px"><i style="width:${Math.round(100 * job.Done / Math.max(1, job.Total))}%"></i></div></div></div>` : ''}
     <div class="row"><i class="dot ${dot(lib.status)}"></i><div><div class="label">Library</div><div class="value" title="${lib.status}">${lib.status || 'Idle'}</div></div></div>
     <div class="row"><i class="dot ${dot(db.status)}"></i><div><div class="label">Film database</div><div class="value" title="${db.status}">${db.status || 'Waiting'}${db.status === 'Up to date' ? ` · ${ago(db.updated)}` : ''}</div></div></div>`.s;
@@ -196,6 +198,13 @@ addEventListener('hashchange', route);
 addEventListener('DOMContentLoaded', async () => {
   await refreshState().catch(() => {});
   render();
+  // Say so once after an update restart.
+  try {
+    if (S.state?.updatedFrom && localStorage.getItem('emulsion.updatedTo') !== S.state.version) {
+      localStorage.setItem('emulsion.updatedTo', S.state.version);
+      toast(`Updated from ${S.state.updatedFrom} to ${S.state.version}`);
+    }
+  } catch { /* storage unavailable */ }
   const poll = async () => {
     try { await refreshState(); } catch { /* offline: keep trying */ }
     setTimeout(poll, S.state?.library?.job?.Running || /…/.test(S.state?.library?.status + S.state?.filmdb?.status) ? 1200 : 4000);

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type ImportFile struct {
@@ -38,6 +39,18 @@ type ImportSource struct {
 	Zip    bool
 	Name   string // suggested roll name
 	Files  []ImportFile
+	Groups []ImportGroup // sub-folders, each a candidate roll
+}
+
+// ImportGroup describes one sub-folder of a source, with suggestions for naming it as a roll.
+type ImportGroup struct {
+	Group  string // Rel path of the sub-folder, "" for the top level
+	Count  int
+	Folder string // the folder's own name
+	Name   string // tidied name, e.g. "Roll 1 - Portra 400" -> "Portra 400"
+	Film   string // best film database match for the folder name, if any
+	ISO    string
+	Date   string // earliest file date
 }
 
 func (a *App) stagingDir() string { return filepath.Join(a.DataDir, "staging") }
@@ -101,7 +114,105 @@ func (a *App) OpenSource(src string, subfolders bool) (*ImportSource, error) {
 		}
 		return 1
 	})
+	out.Groups = a.groupsOf(out)
 	return out, err
+}
+
+// groupsOf summarises a source's sub-folders and suggests a tidy roll name and film for each.
+func (a *App) groupsOf(src *ImportSource) []ImportGroup {
+	lines, _, _ := a.db.Lines()
+	index := map[string]int{}
+	var groups []ImportGroup
+	for _, f := range src.Files {
+		i, ok := index[f.Group]
+		if !ok {
+			i = len(groups)
+			index[f.Group] = i
+			groups = append(groups, ImportGroup{Group: f.Group, Date: f.Date})
+		}
+		groups[i].Count++
+		groups[i].Date = min(groups[i].Date, f.Date)
+	}
+	for i := range groups {
+		g := &groups[i]
+		g.Folder = path.Base("/" + g.Group)
+		if g.Group == "" {
+			g.Folder = src.Name
+		}
+		g.Name = tidyName(g.Folder)
+		g.Film = guessFilm(lines, g.Folder)
+		g.ISO = guessISO(g.Film)
+		if g.ISO == "" {
+			g.ISO = guessISO(g.Folder)
+		}
+	}
+	return groups
+}
+
+var rollPrefix = regexp.MustCompile(`(?i)^(?:(?:roll|film|order|job|scans?|negs?|negatives)\s*#?\s*\d+|#\d+|\d{1,3})(?:\s*[-_:.)]\s*|\s+)`)
+
+// tidyName turns lab folder names into something nicer to browse: "roll_03_-_Portra_400" -> "Portra 400".
+func tidyName(folder string) string {
+	s := strings.Join(strings.Fields(strings.NewReplacer("_", " ", "+", " ").Replace(folder)), " ")
+	if t := strings.TrimSpace(strings.Trim(rollPrefix.ReplaceAllString(s, ""), "-_. ")); t != "" {
+		return t
+	}
+	return s
+}
+
+var filmStopWords = map[string]bool{"roll": true, "film": true, "films": true, "scan": true, "scans": true, "order": true, "the": true, "and": true,
+	"lab": true, "hi": true, "res": true, "low": true, "high": true, "jpg": true, "jpeg": true, "tif": true, "tiff": true, "neg": true, "negs": true, "negatives": true, "of": true}
+
+// guessFilm finds the film a folder name most likely refers to ("Roll 2 - HP5" -> "Ilford HP5").
+// It needs a distinctive word, a word plus a speed, or two words to match, so "Beach day" guesses nothing.
+func guessFilm(lines []string, folder string) string {
+	var words []string
+	for _, w := range nameTokens(folder) {
+		if !filmStopWords[w] {
+			words = append(words, w)
+		}
+	}
+	best, bestScore := "", 0
+	for i := 1; i < len(lines); i++ {
+		fields := strings.Split(lines[i], ";")
+		if len(fields) <= colName {
+			continue
+		}
+		name := strings.TrimSpace(fields[colName])
+		ft := nameTokens(name)
+		alpha, digit, mixed := 0, 0, false
+		for _, w := range words {
+			if !slices.Contains(ft, w) {
+				continue
+			}
+			switch {
+			case isDigits(w):
+				digit++
+			case strings.ContainsAny(w, "0123456789"):
+				alpha++
+				mixed = true
+			case len(w) >= 3:
+				alpha++
+			}
+		}
+		if alpha == 0 || (digit == 0 && alpha < 2 && !mixed) {
+			continue
+		}
+		// Prefer names that are mostly explained by the folder: "Ilford HP5" beats "Ilford HP5 PLUS 400 (black box)".
+		score := alpha*10 + digit*6 - (len(ft) - alpha - digit)
+		if score > bestScore {
+			best, bestScore = name, score
+		}
+	}
+	return best
+}
+
+func nameTokens(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+func isDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
 }
 
 func (a *App) isExport(name string) bool {
@@ -181,12 +292,34 @@ type ImportRequest struct {
 	Split      bool     // one roll per sub-folder of the source
 	Name       string
 	Meta
-	After string // app to open the new rolls in
+	Rolls []RollOverride // per-roll name and metadata when splitting
+	After string         // app to open the new rolls in
+}
+
+// RollOverride names one sub-folder's roll; its non-empty metadata wins over the request's.
+type RollOverride struct {
+	Group, Name string
+	Meta
 }
 
 type rollPlan struct {
 	Name, Dir string // Dir is absolute
 	Files     []ImportFile
+	Meta      Meta
+}
+
+// merged overlays non-empty override fields on base.
+func merged(base, over Meta) Meta {
+	for _, kv := range []struct {
+		dst *string
+		src string
+	}{{&base.Film, over.Film}, {&base.ISO, over.ISO}, {&base.Make, over.Make},
+		{&base.Model, over.Model}, {&base.Lens, over.Lens}, {&base.Date, over.Date}} {
+		if strings.TrimSpace(kv.src) != "" {
+			*kv.dst = kv.src
+		}
+	}
+	return base
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -271,6 +404,11 @@ func (a *App) PlanImport(req ImportRequest, src *ImportSource) ([]rollPlan, erro
 	if _, err := metaArgs(req.Meta, nil); err != nil {
 		return nil, err
 	}
+	for _, o := range req.Rolls {
+		if _, err := metaArgs(o.Meta, nil); err != nil {
+			return nil, fmt.Errorf("%s: %w", o.Name, err)
+		}
+	}
 	files := src.Files
 	if len(req.Files) > 0 {
 		want := map[string]bool{}
@@ -299,7 +437,7 @@ func (a *App) PlanImport(req ImportRequest, src *ImportSource) ([]rollPlan, erro
 			if !ok {
 				i = len(plans)
 				index[d] = i
-				plans = append(plans, rollPlan{Name: filepath.Base(d), Dir: d})
+				plans = append(plans, rollPlan{Name: filepath.Base(d), Dir: d, Meta: req.Meta})
 			}
 			plans[i].Files = append(plans[i].Files, f)
 		}
@@ -325,13 +463,17 @@ func (a *App) PlanImport(req ImportRequest, src *ImportSource) ([]rollPlan, erro
 		}
 	}
 	var plans []rollPlan
+	seen := map[string]string{}
 	for _, g := range order {
 		gf := groups[g]
-		name := strings.TrimSpace(req.Name)
-		if req.Split && g != "" {
-			name = path.Base(g)
-			if len(order) > 1 && strings.TrimSpace(req.Name) != "" && req.Name != src.Name {
-				name = req.Name + " " + path.Base(g)
+		name, meta := strings.TrimSpace(req.Name), req.Meta
+		if req.Split {
+			name = tidyName(path.Base("/" + g))
+			if i := slices.IndexFunc(req.Rolls, func(o RollOverride) bool { return o.Group == g }); i >= 0 {
+				if n := strings.TrimSpace(req.Rolls[i].Name); n != "" {
+					name = n
+				}
+				meta = merged(meta, req.Rolls[i].Meta)
 			}
 		}
 		if name == "" {
@@ -341,11 +483,18 @@ func (a *App) PlanImport(req ImportRequest, src *ImportSource) ([]rollPlan, erro
 		for _, f := range gf {
 			date = min(date, f.Date)
 		}
-		rel, err := folderFor(structure, tokens(req, name, g, date))
+		r := req
+		r.Meta = meta
+		rel, err := folderFor(structure, tokens(r, name, g, date))
 		if err != nil {
 			return nil, err
 		}
-		plans = append(plans, rollPlan{Name: name, Dir: filepath.Join(filepath.FromSlash(req.Dest), rel), Files: gf})
+		dir := filepath.Join(filepath.FromSlash(req.Dest), rel)
+		if other, dup := seen[strings.ToLower(dir)]; dup {
+			return nil, fmt.Errorf("the rolls %q and %q would go into the same folder — give them different names", other, name)
+		}
+		seen[strings.ToLower(dir)] = name
+		plans = append(plans, rollPlan{Name: name, Dir: dir, Files: gf, Meta: meta})
 	}
 	return plans, nil
 }
@@ -456,7 +605,9 @@ func (a *App) importFiles(req ImportRequest, src *ImportSource, plans []rollPlan
 			if err := os.MkdirAll(pl.Dir, 0o755); err != nil {
 				return dirs, err
 			}
-			vals := tokens(req, pl.Name, "", "")
+			r := req
+			r.Meta = pl.Meta
+			vals := tokens(r, pl.Name, "", "")
 			moved := map[string]bool{}
 			renamed := map[string]string{}
 			for i, f := range pl.Files {
@@ -493,7 +644,7 @@ func (a *App) importFiles(req ImportRequest, src *ImportSource, plans []rollPlan
 			}
 		}
 		a.lib.setJob(func(j *Job) { j.Message = "Tagging " + pl.Name + "…" })
-		if err := writeMeta(written, req.Meta, nil); err != nil {
+		if err := writeMeta(written, pl.Meta, nil); err != nil {
 			return dirs, err
 		}
 		dir := filepath.ToSlash(pl.Dir)
