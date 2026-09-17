@@ -79,6 +79,32 @@ go test ./...
 The UI is plain HTML, CSS and JavaScript in `web/`, embedded into the binary, so there's no build step.
 After changing `winres/`, rebuild the Windows resources with `go-winres make --arch amd64`.
 
+## Releases
+
+Versions follow [semantic versioning](https://semver.org/). To publish one, tag a commit and push the tag:
+
+```bash
+git tag v0.1.0
+```
+
+```bash
+git push origin v0.1.0
+```
+
+The Release workflow then runs the tests and builds:
+
+- `Emulsion-<version>-windows-amd64.zip`: the desktop app, with the version in the `.exe` details
+- `emulsion-<version>-{linux,darwin}-{amd64,arm64}.tar.gz`, plus `SHA256SUMS.txt`
+- a GitHub release with notes generated from merged PRs (tags with a `-`, such as `v0.2.0-beta.1`,
+  are marked as pre-releases)
+- a multi-arch Docker image, `ghcr.io/<owner>/<repo>:<version>` and `:latest`
+
+`emulsion -version` prints the version, and it also shows under Settings → System. Local builds say `dev`
+unless you pass `-ldflags "-X main.version=1.2.3"`.
+
+CI runs formatting, vet and tests on Linux, Windows and macOS for every push and pull request, and
+Dependabot keeps Go modules, Actions and the Docker base image up to date.
+
 ## Credits
 
 The film data and box images come from the Open Source Film Database by dxdatabase, licensed under
