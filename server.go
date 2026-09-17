@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -290,6 +291,36 @@ func (a *App) Handler(local bool) http.Handler {
 		}
 		http.ServeFile(w, r, filepath.FromSlash(f))
 	})
+	mux.HandleFunc("GET /api/photo/meta", func(w http.ResponseWriter, r *http.Request) {
+		f := r.FormValue("f")
+		if _, ok := a.lib.Photo(f); !ok {
+			fail(w, 404, errors.New("photo not found"))
+			return
+		}
+		out, err := exiftool("-j", "-G1", "-q", "-q", filepath.FromSlash(f))
+		var tags []map[string]any
+		if json.Unmarshal(out, &tags) != nil || len(tags) == 0 {
+			fail(w, 500, fmt.Errorf("couldn't read metadata: %v", err))
+			return
+		}
+		writeJSON(w, tags[0])
+	})
+	mux.HandleFunc("POST /api/photo/rotate", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			File    string
+			Degrees int
+		}
+		if err := readJSON(r, &req); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		p, err := a.lib.Rotate(req.File, req.Degrees)
+		if err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, p)
+	})
 	mux.HandleFunc("GET /filmimg/{pic}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=86400")
 		http.ServeFileFS(w, r, os.DirFS(filepath.Join(a.db.Dir, "Images")), path.Base(r.PathValue("pic")))
@@ -444,7 +475,7 @@ func (a *App) importThumb(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	t, err := a.thumbs.Get(p, 480)
+	t, err := a.thumbs.Get(p, 480, 1)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -492,10 +523,26 @@ type filmItem struct {
 	Line                                             int
 	Name, Maker, Pic, Begin, End, Country, ISO, Info string
 	Rolls                                            int
+	Avail                                            int // 2 on the market, 1 not sure, 0 discontinued (the database's "Ava" column)
+	Popular                                          int // >0 for an everyday stock that's still made; higher is more common
 }
 
 func toItem(line int, f []string, used map[string]int) filmItem {
-	return filmItem{line, f[colName], f[colMaker], f[colPic], f[colBegin], f[colEnd], f[colCountry], guessISO(f[colName]), f[colInfo], used[strings.ToLower(f[colName])]}
+	it := filmItem{Line: line, Name: strings.TrimSpace(f[colName]), Maker: f[colMaker], Pic: f[colPic], Begin: f[colBegin], End: f[colEnd], Country: f[colCountry],
+		ISO: guessISO(f[colName]), Info: f[colInfo], Rolls: used[strings.ToLower(strings.TrimSpace(f[colName]))]}
+	it.Avail, _ = strconv.Atoi(strings.TrimSpace(f[colAva]))
+	if it.Avail == 2 {
+		it.Popular = popularity(strings.ToLower(it.Name))
+	}
+	return it
+}
+
+// rank orders availability: popular in-production stocks, then anything on the market, then unsure, then discontinued.
+func (it filmItem) rank() int {
+	if it.Popular > 0 {
+		return 3
+	}
+	return min(it.Avail, 2)
 }
 
 func (a *App) filmUsage() map[string]int {
@@ -517,6 +564,7 @@ func (a *App) films(w http.ResponseWriter, r *http.Request) {
 	words := strings.Fields(strings.ToLower(r.FormValue("q")))
 	shot := r.FormValue("shot") == "1"
 	withPic := r.FormValue("pic") == "1"
+	current := r.FormValue("current") == "1"
 	limit, _ := strconv.Atoi(r.FormValue("limit"))
 	offset, _ := strconv.Atoi(r.FormValue("offset"))
 	if limit <= 0 || limit > 500 {
@@ -531,14 +579,16 @@ func (a *App) films(w http.ResponseWriter, r *http.Request) {
 		}
 		f := strings.Split(lines[i], ";")
 		it := toItem(i, f, used)
-		if (shot && it.Rolls == 0) || (withPic && it.Pic == "") {
+		if (shot && it.Rolls == 0) || (withPic && it.Pic == "") || (current && it.Avail != 2) {
 			continue
 		}
 		items = append(items, it)
 	}
-	scores := make([]int, len(items))
+	scores, inName := make([]int, len(items)), make([]bool, len(items))
 	for i, it := range items {
 		scores[i] = nameScore(it.Name, words)
+		n := strings.ToLower(it.Name)
+		inName[i] = !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(n, w) })
 	}
 	idx := make([]int, len(items))
 	for i := range idx {
@@ -548,6 +598,16 @@ func (a *App) films(w http.ResponseWriter, r *http.Request) {
 		i, j := idx[x], idx[y]
 		if shot && items[i].Rolls != items[j].Rolls {
 			return items[i].Rolls > items[j].Rolls
+		}
+		// Films whose name matches beat notes-only matches; then films you can still buy beat historical variants.
+		if inName[i] != inName[j] {
+			return inName[i]
+		}
+		if items[i].rank() != items[j].rank() {
+			return items[i].rank() > items[j].rank()
+		}
+		if items[i].Popular != items[j].Popular {
+			return items[i].Popular > items[j].Popular
 		}
 		return scores[i] > scores[j]
 	})
@@ -593,7 +653,11 @@ func (a *App) film(w http.ResponseWriter, r *http.Request) {
 			rolls = append(rolls, ro)
 		}
 	}
-	writeJSON(w, map[string]any{"line": line, "orig": orig, "header": header, "fields": fields, "iso": guessISO(fields[colName]), "rolls": rolls})
+	avail := -1
+	if line > 0 {
+		avail = toItem(line, fields, nil).Avail
+	}
+	writeJSON(w, map[string]any{"line": line, "orig": orig, "header": header, "fields": fields, "iso": guessISO(fields[colName]), "rolls": rolls, "avail": avail})
 }
 
 func (a *App) filmSave(w http.ResponseWriter, r *http.Request) {
@@ -792,20 +856,25 @@ func (a *App) saveSettings(w http.ResponseWriter, r *http.Request, local bool) {
 
 func (a *App) thumb(w http.ResponseWriter, r *http.Request) {
 	f := r.FormValue("f")
-	if _, ok := a.lib.Photo(f); !ok {
+	photo, ok := a.lib.Photo(f)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	size := 480
-	if r.FormValue("s") == "l" {
+	switch r.FormValue("s") {
+	case "l":
 		size = 2000
+	case "f":
+		size = 8000 // zoomed-in viewing of formats browsers can't show, like TIFF and RAW
 	}
-	p, err := a.thumbs.Get(filepath.FromSlash(f), size)
+	p, err := a.thumbs.Get(filepath.FromSlash(f), size, photo.Orientation)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	w.Header().Set("Cache-Control", "private, max-age=604800")
+	// Revalidate rather than cache for days: rotating a photo changes its thumbnail under the same URL.
+	w.Header().Set("Cache-Control", "private, no-cache")
 	http.ServeFile(w, r, p)
 }
 

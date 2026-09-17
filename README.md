@@ -10,7 +10,10 @@ the way qBittorrent does. The desktop app can also turn on a password-protected 
 ## What it does
 
 - **Library.** Every folder of images is a roll. Rolls are grouped by year, with film, camera, lens and ISO.
-  A lightbox shows each frame.
+- **Viewer.** Zoom with the scroll wheel, a pinch, a double-click or +/−, and drag to pan. Fit and 1:1 are one
+  key away (`0`, `1`), and zooming past the preview loads the full-resolution file. Rotate with `R` and save the
+  rotation into the photo's EXIF orientation, or into the XMP sidecar for RAW files. The info panel (`I`) shows
+  film, camera, lens, ISO, date, size and every metadata tag. A filmstrip and the arrow keys move between frames.
 - **Metadata in the files.** Film, camera, lens, ISO and date are written as EXIF/XMP, so Lightroom and
   other apps see them. The film is stored as the keyword `film:<name>`. Camera RAW files get a Lightroom-style
   `.xmp` sidecar, and the RAW itself is never modified.
@@ -22,6 +25,9 @@ the way qBittorrent does. The desktop app can also turn on a password-protected 
   and guesses the film from the folder name. You choose the naming style.
 - **Hot folder.** Save lab zips into a watched folder and they import on their own. The zips are then moved
   to `Imported/`.
+- **Films in production first.** The database marks which films are still on the market, so the Films page has
+  an **In production** tab, and searches list current stocks ahead of discontinued variants. Everyday stocks lead
+  (Portra, Gold, UltraMax, ColorPlus, HP5, C200…). You can change a film's availability when you edit it.
 - **Film database.** The database is a git clone. Your edits are local commits, and updates are
   `git pull` with your edits kept. You can see and revert your edits in Settings.
 - **Updates.** Emulsion checks GitHub daily for a new release and shows it in the sidebar. **Install and restart**

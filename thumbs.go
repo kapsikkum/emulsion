@@ -31,13 +31,13 @@ func NewThumbs(dir string) *Thumbs {
 	return &Thumbs{Dir: dir, sem: make(chan struct{}, runtime.NumCPU())}
 }
 
-// Get returns the path of a cached thumbnail no larger than size×size.
-func (t *Thumbs) Get(src string, size int) (string, error) {
+// Get returns the path of a cached JPEG no larger than size×size, turned upright per its EXIF orientation.
+func (t *Thumbs) Get(src string, size, orientation int) (string, error) {
 	st, err := os.Stat(src)
 	if err != nil {
 		return "", err
 	}
-	sum := sha1.Sum(fmt.Appendf(nil, "%s|%d|%d|%d", src, st.ModTime().UnixNano(), st.Size(), size))
+	sum := sha1.Sum(fmt.Appendf(nil, "%s|%d|%d|%d|%d", src, st.ModTime().UnixNano(), st.Size(), size, orientation))
 	key := hex.EncodeToString(sum[:])
 	dst := filepath.Join(t.Dir, key[:2], key+".jpg")
 	if _, err := os.Stat(dst); err == nil {
@@ -57,7 +57,11 @@ func (t *Thumbs) Get(src string, size int) (string, error) {
 		return "", err
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, fit(img, size), &jpeg.Options{Quality: 84}); err != nil {
+	quality := 84
+	if size >= 4000 {
+		quality = 92 // zoomed-in viewing
+	}
+	if err := jpeg.Encode(&buf, orient(fit(img, size), orientation), &jpeg.Options{Quality: quality}); err != nil {
 		return "", err
 	}
 	os.MkdirAll(filepath.Dir(dst), 0o755)

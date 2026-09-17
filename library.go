@@ -62,6 +62,7 @@ type Photo struct {
 	ImageWidth, ImageHeight                       int   `json:",omitempty"`
 	FileSize                                      int64 `json:",omitempty"`
 	PreservedFileName                             text  `json:",omitempty"` // original name before an import rename
+	Orientation                                   int   `json:",omitempty"` // EXIF orientation, 1-8
 	Subject                                       any   `json:",omitempty"` // string or list
 	Export                                        bool  `json:",omitempty"` // lives in a converted/export sub-folder
 }
@@ -163,7 +164,7 @@ func (l *Library) rollDir(file string) (dir string, export bool) {
 	return d, false
 }
 
-var scanTags = []string{"-j", "-q", "-q", "-d", "%Y-%m-%d", "-Make", "-Model", "-LensModel", "-ISO", "-DateTimeOriginal", "-ImageWidth", "-ImageHeight", "-FileSize#", "-PreservedFileName", "-XMP-dc:Subject",
+var scanTags = []string{"-j", "-q", "-q", "-d", "%Y-%m-%d", "-Make", "-Model", "-LensModel", "-ISO", "-DateTimeOriginal", "-ImageWidth", "-ImageHeight", "-FileSize#", "-PreservedFileName", "-Orientation#", "-XMP-dc:Subject",
 	"-CaptureFilmStock", "-CaptureCameraMake", "-CaptureCameraModel", "-CaptureLensModel", "-CaptureFilmISO"}
 
 func readMeta(recursive bool, paths ...string) ([]Photo, error) {
@@ -239,6 +240,9 @@ func override(p *Photo, s rawMeta) {
 	if s.Subject != nil {
 		p.Subject = s.Subject
 	}
+	if s.Orientation != 0 {
+		p.Orientation = s.Orientation
+	}
 }
 
 // Scan re-reads every library root.
@@ -313,6 +317,7 @@ type Roll struct {
 	Exports                      []Photo `json:",omitempty"`
 	Count, ExportCount, RawCount int
 	Cover                        string
+	CoverOrientation             int `json:",omitempty"`
 	Films, Cameras, Lenses, ISO  []string
 }
 
@@ -362,11 +367,11 @@ func (l *Library) Rolls(withFrames bool) []*Roll {
 		byName(r.Exports)
 		r.Count, r.ExportCount = len(r.Frames), len(r.Exports)
 		// Converted positives make a better cover than an orange negative.
+		cover := r.Frames
 		if len(r.Exports) > 0 {
-			r.Cover = r.Exports[0].SourceFile
-		} else {
-			r.Cover = r.Frames[0].SourceFile
+			cover = r.Exports
 		}
+		r.Cover, r.CoverOrientation = cover[0].SourceFile, cover[0].Orientation
 		if !withFrames {
 			r.Frames, r.Exports = nil, nil
 		}
@@ -513,6 +518,31 @@ func metaTargets(files []string) ([]string, error) {
 		}
 	}
 	return targets, nil
+}
+
+// Rotate turns a photo clockwise by deg (a multiple of 90) by rewriting its EXIF orientation, or its sidecar's for RAW.
+func (l *Library) Rotate(file string, deg int) (Photo, error) {
+	p, ok := l.Photo(file)
+	if !ok {
+		return Photo{}, errors.New("photo not found")
+	}
+	if deg%90 != 0 {
+		return Photo{}, errors.New("rotation must be a multiple of 90 degrees")
+	}
+	o := rotateOrientation(max(1, p.Orientation), deg)
+	targets, err := metaTargets([]string{filepath.FromSlash(file)})
+	if err != nil {
+		return Photo{}, err
+	}
+	if _, err := exiftool(append([]string{"-overwrite_original", "-q", fmt.Sprintf("-Orientation#=%d", o)}, targets...)...); err != nil {
+		return Photo{}, err
+	}
+	dir, _ := l.rollDir(file)
+	if err := l.rescanDir(dir); err != nil {
+		return Photo{}, err
+	}
+	p, _ = l.Photo(file)
+	return p, nil
 }
 
 // WriteRoll applies metadata to every frame of a roll, converted exports included.

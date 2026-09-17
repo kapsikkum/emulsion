@@ -20,7 +20,8 @@ function html(strings, ...vals) {
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const enc = encodeURIComponent;
-const thumb = (f, large) => `/api/thumb?${large ? 's=l&' : ''}f=${enc(f)}`;
+// size: falsy = grid, true = large preview, 'f' = full resolution. o (EXIF orientation) keeps rotated thumbnails from coming out of the browser cache.
+const thumb = (f, size, o) => `/api/thumb?${size === 'f' ? 's=f&' : size ? 's=l&' : ''}${o > 1 ? `o=${o}&` : ''}f=${enc(f)}`;
 const filmImg = pic => `/filmimg/${enc(pic)}`;
 const img = (src, alt = '') => html`<img class="lazy" loading="lazy" decoding="async" alt="${alt}" src="${src}" onload="this.classList.add('loaded')" onerror="this.classList.add('loaded');this.style.visibility='hidden'">`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -75,6 +76,10 @@ const ICONS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   box: '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/>',
+  minus: '<path d="M5 12h14"/>',
+  rotl: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>',
+  rotr: '<path d="M20 12a8 8 0 1 1-2.4-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
 };
 const icon = (name, cls = '') => raw(`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`);
 const LOGO = raw('<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb35c"/><stop offset="1" stop-color="#ff6a13"/></linearGradient></defs><circle cx="32" cy="34" r="24" fill="url(#lg)"/><circle cx="32" cy="34" r="15" fill="#0f0d0c"/><circle cx="32" cy="34" r="6" fill="url(#lg)"/><rect x="28" y="2" width="8" height="10" rx="2.5" fill="url(#lg)"/></svg>');
@@ -325,7 +330,7 @@ function filmPicker(input, onPick) {
     input.setAttribute('aria-expanded', String(!list.hidden));
     list.innerHTML = html`${items.map((f, i) => html`<div class="ac-item ${i === sel ? 'on' : ''}" role="option" data-i="${i}">
       <div class="thumb">${f.Pic ? img(filmImg(f.Pic)) : icon('film')}</div>
-      <div><b>${f.Name}</b><small>${[f.Maker, f.Begin && (f.End ? `${f.Begin}–${f.End}` : f.Begin)].filter(Boolean).join(' · ')}${f.Rolls ? ` · shot ${plural(f.Rolls, 'roll')}` : ''}</small></div></div>`)}`.s;
+      <div><b>${f.Name}</b><small>${f.Avail === 2 ? html`<span class="accent">In production</span> · ` : ''}${[f.Maker, f.Begin && (f.End ? `${f.Begin}–${f.End}` : f.Begin)].filter(Boolean).join(' · ')}${f.Rolls ? ` · shot ${plural(f.Rolls, 'roll')}` : ''}</small></div></div>`)}`.s;
     $$('.ac-item', list).forEach(el => el.onmousedown = e => { e.preventDefault(); pick(items[+el.dataset.i]); });
   };
   const pick = f => { input.value = f.Name; items = []; show(); onPick?.(f); };
@@ -353,47 +358,4 @@ function filmPicker(input, onPick) {
       show();
     }
   });
-}
-
-// Full-screen frame viewer.
-function lightbox(frames, index) {
-  const lb = document.createElement('div');
-  lb.className = 'lightbox';
-  lb.setAttribute('role', 'dialog');
-  lb.setAttribute('aria-modal', 'true');
-  document.body.append(lb);
-  document.body.style.overflow = 'hidden';
-  const film = p => (Array.isArray(p.Subject) ? p.Subject : [p.Subject]).map(String).find(s => s.startsWith('film:'))?.slice(5);
-  const show = () => {
-    const p = frames[index];
-    const item = (k, v) => v ? html`<span><small>${k}</small><b>${v}</b></span>` : '';
-    lb.innerHTML = html`<div class="top"><span class="count">${String(index + 1).padStart(2, '0')} / ${String(frames.length).padStart(2, '0')}</span>
-        <span class="name">${p.SourceFile.split('/').pop()}</span>
-        <a class="btn sm" href="/api/photo?f=${enc(p.SourceFile)}" target="_blank" rel="noopener">${icon('external')}Original</a>
-        <button class="btn ghost icon" data-x aria-label="Close">${icon('x')}</button></div>
-      <div class="stage"><img alt="${p.SourceFile.split('/').pop()}" src="${thumb(p.SourceFile, true)}">
-        <button class="nav-btn prev" aria-label="Previous">${icon('left')}</button><button class="nav-btn next" aria-label="Next">${icon('right')}</button></div>
-      <div class="bar">${item('Film', film(p))}${item('Camera', [p.Make, p.Model].filter(Boolean).join(' '))}${item('Lens', p.LensModel)}${item('ISO', p.ISO)}${item('Date', p.DateTimeOriginal && fmtDate(p.DateTimeOriginal.slice(0, 10)))}${item('Size', p.ImageWidth && `${p.ImageWidth}×${p.ImageHeight}`)}</div>`.s;
-    $('[data-x]', lb).onclick = close;
-    $('.prev', lb).onclick = () => go(-1);
-    $('.next', lb).onclick = () => go(1);
-    $('[data-x]', lb).focus();
-    if (frames[index + 1]) new Image().src = thumb(frames[index + 1].SourceFile, true);
-  };
-  const go = d => { index = (index + d + frames.length) % frames.length; show(); };
-  const onKey = e => {
-    if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowRight') go(1);
-    else if (e.key === 'ArrowLeft') go(-1);
-  };
-  let touchX = null;
-  lb.addEventListener('touchstart', e => (touchX = e.touches[0].clientX), { passive: true });
-  lb.addEventListener('touchend', e => { if (touchX !== null && Math.abs(e.changedTouches[0].clientX - touchX) > 50) go(e.changedTouches[0].clientX < touchX ? 1 : -1); touchX = null; });
-  function close() {
-    lb.remove();
-    document.body.style.overflow = '';
-    removeEventListener('keydown', onKey);
-  }
-  addEventListener('keydown', onKey);
-  show();
 }

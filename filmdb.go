@@ -212,6 +212,32 @@ func (db *FilmDB) Revert(hash string) error {
 	return nil
 }
 
+// popularFilms are everyday stocks, most common first. Only films the database marks as on the market count,
+// so a 1990s "Kodak Gold 200" variant doesn't jump ahead of the one you can buy today.
+var popularFilms = func() []*regexp.Regexp {
+	var out []*regexp.Regexp
+	for _, p := range []string{
+		`kodak.*portra`, `kodak gold`, `kodak ultra ?max`, `kodak colou?r ?plus`, `kodak.*ektar`, `kodak.*pro ?image`,
+		`fujicolor|fujifilm (200|400)|\bc200\b`, `ilford hp5`, `kodak.*tri-x`, `ilford fp4`, `kodak t-?max`, `ilford delta`,
+		`cinestill`, `kodak.*ektachrome`, `velvia|provia`, `acros`, `ilford xp2`, `ilford pan ?f`, `ilford (sfx|ortho)`,
+		`kentmere`, `harman phoenix`, `lomography colou?r|lomochrome|lomography .*(berlin|lady grey|earl grey)`,
+		`fomapan|retropan`, `rollei (rpx|retro|superpan)`, `adox (chs|silvermax|scala)`, `agfa ?photo apx|agfa apx`, `kosmo foto`,
+	} {
+		out = append(out, regexp.MustCompile(p))
+	}
+	return out
+}()
+
+// popularity is 0 for ordinary films, otherwise higher for more common stocks.
+func popularity(lowerName string) int {
+	for i, re := range popularFilms {
+		if re.MatchString(lowerName) {
+			return len(popularFilms) - i
+		}
+	}
+	return 0
+}
+
 var isoRe = regexp.MustCompile(`(?i)(?:iso|asa|ei)\s*(\d{2,5})|(\d{2,5})\s*(?:iso|asa|dx|t\b|d\b|n\b)|\b(25|32|50|64|80|100|125|160|200|250|320|400|500|640|800|1000|1600|3200|6400)\b`)
 
 // guessISO pulls a speed out of a film name ("Kodak Portra 400" -> "400").

@@ -33,7 +33,7 @@ const libFilter = { q: '', film: '', camera: '' };
 const frameCount = r => r.Count || r.ExportCount || 0;
 const rollCard = r => html`<a class="roll" href="#/roll/${enc(r.Dir)}">
   <div class="rebate"><span>${r.Films[0] || 'Unknown stock'}</span><span>${r.ISO[0] ? `ISO ${r.ISO[0]}` : ''}</span></div>
-  <div class="cover">${img(thumb(r.Cover), r.Name)}${r.ExportCount ? html`<span class="badge-pos">Positives</span>` : ''}</div>
+  <div class="cover">${img(thumb(r.Cover, false, r.CoverOrientation), r.Name)}${r.ExportCount ? html`<span class="badge-pos">Positives</span>` : ''}</div>
   <div class="rebate bottom"><span>▸ ${String(frameCount(r)).padStart(2, '0')}</span><span>${r.Date ? fmtDate(r.Date) : 'Undated'}</span></div>
   <div class="meta"><b title="${r.Name}">${r.Name}</b><div class="line"><span>${r.Cameras.join(', ') || 'Unknown camera'}</span><span class="nowrap">${plural(frameCount(r), 'frame')}</span></div></div>
 </a>`;
@@ -200,9 +200,9 @@ views.roll = async (main, [dir], _, alive) => {
       <button role="tab" data-tab="scans" class="${tab === 'scans' ? 'on' : ''}">Scans · ${r.Frames.length}</button></div>
       <span class="muted">${tab === 'positives' ? 'Converted exports, e.g. from NegPy' : 'Original scans'}</span></div>` : ''}
     <div class="sheet"><div class="frames">${shown.map((p, i) => html`<button class="frame" data-i="${i}" aria-label="Open frame ${i + 1}">
-      <div class="img">${img(thumb(p.SourceFile), `Frame ${i + 1}`)}${isRawFile(p.SourceFile) ? html`<span class="badge-raw">RAW</span>` : ''}</div>
+      <div class="img">${img(thumb(p.SourceFile, false, p.Orientation), `Frame ${i + 1}`)}${isRawFile(p.SourceFile) ? html`<span class="badge-raw">RAW</span>` : ''}</div>
       <div class="n"><span>▸ ${String(i + 1).padStart(2, '0')}</span><span>${p.SourceFile.split('/').pop()}</span></div></button>`)}</div></div>`.s;
-  $$('.frame', main).forEach(b => (b.onclick = () => lightbox(shown, +b.dataset.i)));
+  $$('.frame', main).forEach(b => (b.onclick = () => lightbox(shown, +b.dataset.i, { roll: r })));
   $('[data-edit]', main).onclick = () => editRoll(r);
   $$('[data-tab]', main).forEach(b => (b.onclick = () => { rollView.tab = b.dataset.tab; route(); }));
 
