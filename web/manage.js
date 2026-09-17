@@ -107,7 +107,8 @@ views.settings = async (main, _, __, alive) => {
 
       <section class="card"><div class="section">
         <h2>System</h2>
-        <dl class="kv">${dep(st.deps.git, 'Git', st.os === 'windows' ? 'winget install Git.Git' : 'apt install git')}
+        <dl class="kv"><dt>Version</dt><dd class="mono">${st.version}</dd>
+          ${dep(st.deps.git, 'Git', st.os === 'windows' ? 'winget install Git.Git' : 'apt install git')}
           ${dep(st.deps.exiftool, 'ExifTool', st.os === 'windows' ? 'winget install OliverBetz.ExifTool' : 'apt install libimage-exiftool-perl')}
           <dt>Data folder</dt><dd class="mono" style="overflow-wrap:anywhere">${st.dataDir}</dd></dl>
       </div></section>

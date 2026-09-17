@@ -1,0 +1,115 @@
+name: Release
+
+# Push a tag like v1.2.0 (or v1.2.0-beta.1 for a pre-release) to publish binaries and a Docker image.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build without publishing a release (e.g. 0.0.0-test)"
+        required: true
+        default: 0.0.0-test
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
+          go test ./...
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          v="${VERSION#v}"
+          mkdir -p dist
+          ldflags="-s -w -X main.version=$v"
+
+          # Windows: stamp the version into the .exe details, then build as a GUI app.
+          go install github.com/tc-hib/go-winres@latest
+          numeric="${v%%-*}"
+          go-winres make --arch amd64 --product-version "$numeric.0" --file-version "$numeric.0"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags -H windowsgui" -o build/windows/Emulsion.exe .
+          cp README.md build/windows/
+          (cd build/windows && zip -q -r "../../dist/Emulsion-$v-windows-amd64.zip" .)
+
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            out="build/$os-$arch"
+            mkdir -p "$out"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$out/emulsion" .
+            cp README.md "$out/"
+            tar -C "$out" -czf "dist/emulsion-$v-$os-$arch.tar.gz" .
+          done
+
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emulsion-${{ env.VERSION }}
+          path: dist/*
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: emulsion-${{ env.VERSION }}
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  docker:
+    name: Publish Docker image
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

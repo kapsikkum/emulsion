@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// version is set at build time: go build -ldflags "-X main.version=1.2.3"
+var version = "dev"
+
 func logf(format string, args ...any) { log.Printf(format, args...) }
 
 func defaultDataDir() string {
@@ -30,7 +33,12 @@ func main() {
 	headless := flag.Bool("headless", false, "run only the web UI (NAS / server / Docker)")
 	addr := flag.String("addr", "", "web UI address in headless mode (default: settings, else 0.0.0.0:8080)")
 	library := flag.String("library", "", "headless: add this photo folder as a library")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("Emulsion", version)
+		return
+	}
 
 	os.MkdirAll(*data, 0o755)
 	if lf, err := os.OpenFile(filepath.Join(*data, "emulsion.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {

@@ -323,6 +323,7 @@ func (a *App) state(w http.ResponseWriter, r *http.Request, local bool) {
 	}
 	out["os"] = runtime.GOOS
 	out["dataDir"] = filepath.ToSlash(a.DataDir)
+	out["version"] = version
 	writeJSON(w, out)
 }
 
