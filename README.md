@@ -119,7 +119,7 @@ The Release workflow then runs the tests and builds:
   are marked as pre-releases)
 - a multi-arch Docker image, `ghcr.io/<owner>/<repo>:<version>` and `:latest`
 
-`emulsion -version` prints the version, and it also shows under Settings → System. Local builds say `dev`
+`emulsion -version` prints the version, and it also shows under Settings → Updates. Local builds say `dev`
 unless you pass `-ldflags "-X main.version=1.2.3"`.
 
 CI runs formatting, vet and tests on Linux, Windows and macOS for every push and pull request, and
