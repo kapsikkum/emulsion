@@ -100,7 +100,7 @@ func (u *Updater) Check() UpdateInfo {
 	u.rel = rel
 	u.info.Latest = strings.TrimPrefix(rel.Tag, "v")
 	u.info.Notes, u.info.URL = rel.Notes, rel.URL
-	u.info.Available = newerVersion(u.info.Latest, version)
+	u.info.Available = version != "dev" && newerVersion(u.info.Latest, version)
 	u.info.CanInstall, u.info.Reason = canInstall(rel)
 	return u.info
 }

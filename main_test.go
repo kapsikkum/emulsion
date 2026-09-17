@@ -153,7 +153,7 @@ func TestImportEndToEnd(t *testing.T) {
 
 	a := NewApp(filepath.Join(root, "data"), false)
 	a.settings.Update(func(s *Settings) { s.Libraries = []string{filepath.ToSlash(lib)} })
-	s, err := a.OpenSource(filepath.ToSlash(src), true)
+	s, err := a.OpenSource(filepath.ToSlash(src), true, false)
 	if err != nil || len(s.Files) != 2 || s.Files[1].Group != "sub" {
 		t.Fatalf("%+v %v", s, err)
 	}
@@ -175,14 +175,14 @@ func TestImportEndToEnd(t *testing.T) {
 	}
 	// Tag on import (changes file sizes), then re-scanning the source still flags duplicates.
 	os.WriteFile(filepath.Join(src, "photo.jpg"), jpegBytes(t), 0o644)
-	s, _ = a.OpenSource(filepath.ToSlash(src), true)
+	s, _ = a.OpenSource(filepath.ToSlash(src), true, false)
 	req.Files, req.Film, req.Rename = []string{"photo.jpg"}, "HP5", ""
 	plans, _ = a.PlanImport(req, s)
 	if err := a.runImport(req, s, plans); err != nil {
 		t.Fatal(err)
 	}
 	// Re-scanning the source now flags duplicates.
-	if s2, _ := a.OpenSource(filepath.ToSlash(src), true); slices.ContainsFunc(s2.Files, func(f ImportFile) bool { return !f.Dup }) {
+	if s2, _ := a.OpenSource(filepath.ToSlash(src), true, false); slices.ContainsFunc(s2.Files, func(f ImportFile) bool { return !f.Dup }) {
 		t.Errorf("duplicate not detected: %+v", s2.Files)
 	}
 }

@@ -192,6 +192,7 @@ views.roll = async (main, [dir], _, alive) => {
             <button role="menuitem" data-open="folder">${S.state.os === 'darwin' ? 'Finder' : 'File Explorer'}</button>
             ${apps.some(a => !a.Found) ? html`<a role="menuitem" href="#/settings">Set up more apps…</a>` : ''}
           </div></div>` : ''}
+        <button class="btn" data-rename>${icon('edit')}Rename</button>
         <button class="btn primary" data-edit>${icon('edit')}Edit roll</button>
       </div>
     </section>
@@ -204,6 +205,7 @@ views.roll = async (main, [dir], _, alive) => {
       <div class="n"><span>▸ ${String(i + 1).padStart(2, '0')}</span><span>${p.SourceFile.split('/').pop()}</span></div></button>`)}</div></div>`.s;
   $$('.frame', main).forEach(b => (b.onclick = () => lightbox(shown, +b.dataset.i, { roll: r })));
   $('[data-edit]', main).onclick = () => editRoll(r);
+  $('[data-rename]', main).onclick = () => renameRoll(r);
   $$('[data-tab]', main).forEach(b => (b.onclick = () => { rollView.tab = b.dataset.tab; route(); }));
 
   const menuBtn = $('[data-openmenu]', main);
@@ -236,6 +238,41 @@ views.roll = async (main, [dir], _, alive) => {
 };
 
 const isRawFile = f => /\.(nef|nrw|cr2|cr3|crw|arw|srf|sr2|raf|orf|rw2|pef|srw|3fr|fff|iiq|rwl|x3f|erf|mef|mos|kdc|dcr)$/i.test(f);
+
+// Lab file names, e.g. B001738-R1-00-36A.JPG (order, roll, scan sequence, frame on the film edge).
+const LAB_NAME = /^([a-z]*\d+)-r(\d+)-(\d+)-(\d+[a-z]?|[a-z]{1,2})$/i;
+const dateIn = s => (s.match(/(19|20)\d{2}[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])/) || [''])[0].replace(/[-_.]/g, '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+
+function renameRoll(r) {
+  const film = (r.Films[0] || '').replace(/#\S+/g, '').replace(/\s+/g, ' ').trim();
+  const date = r.Date || dateIn(r.Name);
+  const lab = LAB_NAME.exec((r.Frames?.[0]?.SourceFile || r.Exports?.[0]?.SourceFile || '').split('/').pop()?.replace(/\.[^.]+$/, '') || '');
+  const suggestions = uniq([
+    date && film ? `${date} ${film}` : '',
+    film,
+    date && lab ? `${date} ${lab[1].toUpperCase()} roll ${+lab[2]}` : '',
+    lab ? `${lab[1].toUpperCase()} roll ${+lab[2]}` : '',
+  ]).filter(s => s && s !== r.Name);
+  const { box, close } = layer(html`<header><h2>Rename roll</h2><button class="btn ghost icon" data-close aria-label="Close">${icon('x')}</button></header>
+    <form class="body" id="renameform">
+      <label class="field"><span>Folder name</span><input class="input" name="name" value="${r.Name}" required autofocus></label>
+      ${suggestions.length ? html`<div><div class="subhead" style="margin:0 0 8px">Suggestions</div>
+        <div class="chips">${suggestions.map(s => html`<button type="button" class="btn sm" data-suggest="${s}">${s}</button>`)}</div></div>` : ''}
+      <div class="note">Renames the folder on disk. The photos and their metadata don't change.</div>
+      <p class="mono faint" style="margin:0;overflow-wrap:anywhere">${r.Dir}</p>
+    </form>
+    <footer><button class="btn" data-close>Cancel</button><button class="btn primary" form="renameform">${icon('check')}Rename</button></footer>`, 'drawer');
+  const form = $('form', box);
+  $$('[data-suggest]', box).forEach(b => (b.onclick = () => { form.name.value = b.dataset.suggest; form.name.focus(); }));
+  form.onsubmit = guard(async e => {
+    e.preventDefault();
+    const res = await api('/api/roll/rename', { Dir: r.Dir, Name: form.name.value });
+    S.rolls = null;
+    close();
+    toast('Roll renamed');
+    location.hash = `#/roll/${enc(res.Dir)}`;
+  });
+}
 
 async function editRoll(r) {
   const g = await gear().catch(() => ({ makes: [], models: [], lenses: [] }));

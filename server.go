@@ -136,12 +136,25 @@ func (a *App) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/roll", a.roll)
 	mux.HandleFunc("GET /api/gear", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.lib.Gear()) })
 	mux.HandleFunc("POST /api/roll", a.rollSave)
+	mux.HandleFunc("POST /api/roll/rename", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Dir, Name string }
+		if err := readJSON(r, &req); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		dir, err := a.lib.RenameRoll(req.Dir, req.Name)
+		if err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, map[string]string{"Dir": dir})
+	})
 	mux.HandleFunc("POST /api/rescan", func(w http.ResponseWriter, r *http.Request) {
 		go a.lib.Scan(a.settings.Get().Libraries)
 		writeJSON(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /api/import/scan", func(w http.ResponseWriter, r *http.Request) {
-		src, err := a.OpenSource(r.FormValue("source"), r.FormValue("sub") == "1")
+		src, err := a.OpenSource(r.FormValue("source"), r.FormValue("sub") == "1", r.FormValue("detect") != "0")
 		if err != nil {
 			fail(w, 400, err)
 			return
@@ -155,7 +168,7 @@ func (a *App) Handler(local bool) http.Handler {
 			fail(w, 400, err)
 			return
 		}
-		src, err := a.OpenSource(req.Source, req.Subfolders)
+		src, err := a.OpenSource(req.Source, req.Subfolders, req.Detect)
 		if err == nil {
 			var plans []rollPlan
 			if plans, err = a.PlanImport(req, src); err == nil {

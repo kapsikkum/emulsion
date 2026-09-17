@@ -24,7 +24,7 @@ const ROLL_STYLES = [
 ];
 
 const imp = {
-  rollStyle: 'tidy', rolls: {},
+  rollStyle: 'tidy', rolls: {}, detect: true,
   source: '', src: null, sub: true, selected: new Set(), hideDups: false, uploads: [],
   mode: 'copy', dest: '', structure: null, rename: null, split: false,
   name: '', nameTouched: false, Film: '', ISO: '', Make: '', Model: '', Lens: '', Date: '', after: '',
@@ -68,7 +68,9 @@ views.import = async (main, _, query, alive) => {
         <div class="progress" style="margin-top:8px"><i style="width:${imp.uploading.pct}%"></i></div></div>` : ''}
       ${imp.source ? html`<div class="subhead" style="margin:22px 0 10px">Selected</div>
         <div class="picked">${icon(imp.src?.Zip ? 'box' : 'folder')}<span class="path">${imp.source}</span></div>
-        ${imp.src && !imp.src.Zip ? html`<label class="switch" style="margin-top:12px"><input type="checkbox" data-sub ${imp.sub ? 'checked' : ''}><i></i><span class="muted">Include sub-folders</span></label>` : ''}` : ''}
+        ${imp.src && !imp.src.Zip ? html`<label class="switch" style="margin-top:12px"><input type="checkbox" data-sub ${imp.sub ? 'checked' : ''}><i></i><span class="muted">Include sub-folders</span></label>` : ''}
+        ${imp.src ? html`<label class="switch" style="margin-top:10px"><input type="checkbox" data-detect ${imp.detect ? 'checked' : ''}><i></i><span class="muted">Find rolls in file names</span></label>
+          ${imp.src.Rolls > 1 ? html`<p class="hint" style="margin-top:8px">${icon('check')} ${plural(imp.src.Rolls, 'roll')} found in the file names, like <span class="mono">${imp.src.Files[0].Rel.split('/').pop()}</span>.</p>` : ''}` : ''}` : ''}
       ${imp.uploads.length > 1 ? html`<div class="subhead" style="margin:22px 0 10px">Uploaded zips</div><div class="list">${imp.uploads.map(u => html`
         <button class="item dir-btn ${u === imp.source ? 'on' : ''}" data-load="${u}">${icon('box', 'lead')}<span class="path">${u.split('/').pop()}</span></button>`)}</div>` : ''}`.s;
 
@@ -84,6 +86,7 @@ views.import = async (main, _, query, alive) => {
     input.onchange = () => upload([...input.files]);
     $('.dropzone', $src).onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
     $('[data-sub]', $src)?.addEventListener('change', e => { imp.sub = e.target.checked; load(imp.source); });
+    $('[data-detect]', $src)?.addEventListener('change', e => { imp.detect = e.target.checked; imp.lastSource = null; load(imp.source); });
     $$('[data-load]', $src).forEach(b => (b.onclick = () => load(b.dataset.load)));
   };
 
@@ -93,7 +96,7 @@ views.import = async (main, _, query, alive) => {
     drawSource();
     $center.innerHTML = html`<div class="empty">${icon('refresh', 'big spin')}<h2>Reading ${path.split('/').pop()}…</h2><p>${/\.zip$/i.test(path) ? 'Unpacking the zip. Big lab downloads take a moment.' : 'Looking for photos.'}</p></div>`.s;
     try {
-      imp.src = await api(`/api/import/scan?sub=${imp.sub ? 1 : 0}&source=${enc(path)}`);
+      imp.src = await api(`/api/import/scan?sub=${imp.sub ? 1 : 0}&detect=${imp.detect ? 1 : 0}&source=${enc(path)}`);
     } catch (e) {
       imp.source = '';
       drawSource();
@@ -218,7 +221,7 @@ views.import = async (main, _, query, alive) => {
   const multiGroup = () => imp.src && new Set(imp.src.Files.filter(f => imp.selected.has(f.Rel)).map(f => f.Group)).size > 1;
   const request = () => ({
     Source: imp.source, Subfolders: imp.sub, Files: [...imp.selected], Mode: imp.mode, Dest: imp.dest,
-    Structure: imp.structure, Rename: imp.rename, Split: imp.split && multiGroup(), Name: imp.name,
+    Structure: imp.structure, Rename: imp.rename, Split: imp.split && multiGroup(), Detect: imp.detect, Name: imp.name,
     Rolls: imp.split && multiGroup() ? selectedGroups().map(g => ({ Group: g.Group, Name: imp.rolls[g.Group]?.name || '', Film: imp.rolls[g.Group]?.Film || '', ISO: imp.rolls[g.Group]?.ISO || '', Date: imp.rolls[g.Group]?.Date || '' })) : [],
     Film: imp.Film, ISO: imp.ISO, Make: imp.Make, Model: imp.Model, Lens: imp.Lens, Date: imp.Date, After: imp.after,
   });
@@ -250,7 +253,7 @@ views.import = async (main, _, query, alive) => {
             const r = imp.rolls[g.Group] || {};
             const key = `r|${g.Group}|`;
             return html`<div class="imp-roll">
-              <div class="imp-roll-head"><span class="mono" title="${g.Group}">${icon('folder')}${g.Folder}</span><span class="muted nowrap">${plural(g.Count, 'photo')}</span></div>
+              <div class="imp-roll-head"><span class="mono" title="${g.Group}">${icon(g.Detected ? 'film' : 'folder')}${g.Lab || g.Folder}</span><span class="muted nowrap">${plural(g.Count, 'photo')}</span></div>
               <input class="input" name="${key}name" value="${r.name}" placeholder="${g.Name}" aria-label="Roll name for ${g.Folder}">
               <div class="imp-roll-meta">
                 <div class="imp-roll-film"><input class="input" name="${key}Film" value="${r.Film}" placeholder="${imp.Film || 'Film stock'}" aria-label="Film for ${g.Folder}"></div>

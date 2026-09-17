@@ -26,11 +26,12 @@ import (
 )
 
 type ImportFile struct {
-	Rel   string // relative to the source root, forward slashes
-	Size  int64
-	Date  string // file date, YYYY-MM-DD
-	Dup   bool   // same name and size already in the library
-	Group string // sub-folder inside the source, "" for the top level
+	Rel      string // relative to the source root, forward slashes
+	Size     int64
+	Date     string // file date, YYYY-MM-DD
+	Dup      bool   // same name and size already in the library
+	Group    string // sub-folder inside the source, "" for the top level
+	Detected bool   `json:",omitempty"` // grouped by its name rather than its folder
 }
 
 type ImportSource struct {
@@ -40,23 +41,26 @@ type ImportSource struct {
 	Name   string // suggested roll name
 	Files  []ImportFile
 	Groups []ImportGroup // sub-folders, each a candidate roll
+	Rolls  int           // rolls found in the file names
 }
 
 // ImportGroup describes one sub-folder of a source, with suggestions for naming it as a roll.
 type ImportGroup struct {
-	Group  string // Rel path of the sub-folder, "" for the top level
-	Count  int
-	Folder string // the folder's own name
-	Name   string // tidied name, e.g. "Roll 1 - Portra 400" -> "Portra 400"
-	Film   string // best film database match for the folder name, if any
-	ISO    string
-	Date   string // earliest file date
+	Group    string // Rel path of the sub-folder, "" for the top level
+	Count    int
+	Folder   string // the folder's own name
+	Lab      string `json:",omitempty"` // "Order B001738, roll 1" when the file names say so
+	Detected bool   // this roll came from the file names, not a sub-folder
+	Name     string // tidied name, e.g. "Roll 1 - Portra 400" -> "Portra 400"
+	Film     string // best film database match for the folder name, if any
+	ISO      string
+	Date     string // earliest file date
 }
 
 func (a *App) stagingDir() string { return filepath.Join(a.DataDir, "staging") }
 
 // OpenSource lists importable images in a folder or zip.
-func (a *App) OpenSource(src string, subfolders bool) (*ImportSource, error) {
+func (a *App) OpenSource(src string, subfolders, detect bool) (*ImportSource, error) {
 	src = filepath.Clean(filepath.FromSlash(src))
 	st, err := os.Stat(src)
 	if err != nil {
@@ -114,8 +118,37 @@ func (a *App) OpenSource(src string, subfolders bool) (*ImportSource, error) {
 		}
 		return 1
 	})
+	if detect {
+		out.Rolls = splitByName(out.Files)
+	}
 	out.Groups = a.groupsOf(out)
 	return out, err
+}
+
+// splitByName re-groups each folder's files by the roll their names belong to, and returns how many
+// rolls that found. Lab downloads arrive as one folder holding several rolls.
+func splitByName(files []ImportFile) int {
+	byFolder := map[string][]int{}
+	for i, f := range files {
+		byFolder[f.Group] = append(byFolder[f.Group], i)
+	}
+	rolls := 0
+	for folder, idx := range byFolder {
+		names := make([]string, len(idx))
+		for i, fi := range idx {
+			names[i] = path.Base(files[fi].Rel)
+		}
+		keys := rollKeys(names)
+		if keys == nil {
+			continue
+		}
+		for i, fi := range idx {
+			files[fi].Group = path.Join(folder, keys[i])
+			files[fi].Detected = true
+		}
+		rolls += distinct(keys)
+	}
+	return rolls
 }
 
 // groupsOf summarises a source's sub-folders and suggests a tidy roll name and film for each.
@@ -140,10 +173,25 @@ func (a *App) groupsOf(src *ImportSource) []ImportGroup {
 			g.Folder = src.Name
 		}
 		g.Name = tidyName(g.Folder)
-		g.Film = guessFilm(lines, g.Folder)
+		filmFrom := g.Folder
+		// The folder a lab download lands in ("OneDrive_2025-12-09") isn't a roll name: use the order and roll instead.
+		first := firstIn(src.Files, g.Group)
+		g.Detected = first.Detected
+		if lab, ok := parseLabName(path.Base(first.Rel)); ok {
+			filmFrom = path.Base("/" + path.Dir("/"+g.Group)) // an order-and-roll key says nothing about the film
+			g.Lab = labLabel(lab)
+			parent := path.Base("/" + path.Dir("/"+g.Group))
+			if g.Detected || genericFolder.MatchString(g.Folder) || genericFolder.MatchString(parent) {
+				g.Name = fmt.Sprintf("%s roll %d", lab.Order, lab.Roll)
+			}
+		}
+		if d := folderDate(g.Folder + " " + path.Base("/"+path.Dir("/"+g.Group)) + " " + src.Name); d != "" {
+			g.Date = d // a date in the folder name beats the file's modification time
+		}
+		g.Film = guessFilm(lines, filmFrom)
 		g.ISO = guessISO(g.Film)
 		if g.ISO == "" {
-			g.ISO = guessISO(g.Folder)
+			g.ISO = guessISO(filmFrom)
 		}
 	}
 	return groups
@@ -189,6 +237,9 @@ func guessFilm(lines []string, folder string) string {
 			case isDigits(w):
 				digit++
 			case strings.ContainsAny(w, "0123456789"):
+				if len(w) < 3 {
+					continue // "r2" from a roll key is not a film name
+				}
 				alpha++
 				mixed = true
 			case len(w) >= 3:
@@ -213,6 +264,15 @@ func nameTokens(s string) []string {
 
 func isDigits(s string) bool {
 	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+func firstIn(files []ImportFile, group string) ImportFile {
+	for _, f := range files {
+		if f.Group == group {
+			return f
+		}
+	}
+	return ImportFile{}
 }
 
 func (a *App) isExport(name string) bool {
@@ -290,6 +350,7 @@ type ImportRequest struct {
 	Structure  string   // folder template under Dest
 	Rename     string   // file name template, "" keeps names
 	Split      bool     // one roll per sub-folder of the source
+	Detect     bool     // find rolls in the file names
 	Name       string
 	Meta
 	Rolls []RollOverride // per-roll name and metadata when splitting
@@ -469,6 +530,9 @@ func (a *App) PlanImport(req ImportRequest, src *ImportSource) ([]rollPlan, erro
 		name, meta := strings.TrimSpace(req.Name), req.Meta
 		if req.Split {
 			name = tidyName(path.Base("/" + g))
+			if i := slices.IndexFunc(src.Groups, func(x ImportGroup) bool { return x.Group == g }); i >= 0 && src.Groups[i].Name != "" {
+				name = src.Groups[i].Name // the suggestion the import page shows
+			}
 			if i := slices.IndexFunc(req.Rolls, func(o RollOverride) bool { return o.Group == g }); i >= 0 {
 				if n := strings.TrimSpace(req.Rolls[i].Name); n != "" {
 					name = n
@@ -543,7 +607,7 @@ func (a *App) logImported(files []ImportFile) {
 
 // Import starts an import in the background.
 func (a *App) Import(req ImportRequest) error {
-	src, err := a.OpenSource(req.Source, req.Subfolders)
+	src, err := a.OpenSource(req.Source, req.Subfolders, req.Detect)
 	if err != nil {
 		return err
 	}
@@ -758,12 +822,12 @@ func (a *App) checkHotFolder(failed map[string]bool) {
 		if time.Since(latestMod(full)) < 2*time.Minute { // still downloading or copying
 			continue
 		}
-		src, err := a.OpenSource(full, true)
+		src, err := a.OpenSource(full, true, true)
 		if err != nil || len(src.Files) == 0 {
 			failed[full] = true
 			continue
 		}
-		req := ImportRequest{Source: full, Subfolders: true, Mode: "copy", Dest: s.ImportTo, Structure: s.Structure, Rename: s.Rename, Name: src.Name}
+		req := ImportRequest{Source: full, Subfolders: true, Detect: true, Split: src.Rolls > 1, Mode: "copy", Dest: s.ImportTo, Structure: s.Structure, Rename: s.Rename, Name: src.Name}
 		plans, err := a.PlanImport(req, src)
 		if err == nil && importMu.TryLock() {
 			err = a.runImport(req, src, plans)

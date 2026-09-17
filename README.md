@@ -23,6 +23,12 @@ the way qBittorrent does. The desktop app can also turn on a password-protected 
   Metadata is applied on the way in. Lab zips with several roll folders become several rolls, each with its own
   editable name, film, ISO and date. Emulsion suggests tidy names ("Roll 1 - Portra 400" becomes "Portra 400")
   and guesses the film from the folder name. You choose the naming style.
+- **Lab file names.** Frontier exports name frames `ORDER-R<roll>-<scan>-<frame>`, e.g. `B001738-R1-00-36A.JPG`.
+  Emulsion reads that: one download folder splits into its rolls, each named after its order and roll, and the
+  date comes from a folder like `OneDrive_2025-12-09`. Other scanners are covered by a general rule: names whose
+  prefix differs only in its numbers are different rolls. The Import page has a switch to turn this off.
+- **Rename rolls.** A roll page can rename its folder on disk, suggesting names such as
+  `2025-12-09 Kodak Gold 200`, so a library full of `OneDrive_…` folders becomes browsable.
 - **Hot folder.** Save lab zips into a watched folder and they import on their own. The zips are then moved
   to `Imported/`.
 - **Films in production first.** The database marks which films are still on the market, so the Films page has

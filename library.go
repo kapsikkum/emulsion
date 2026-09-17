@@ -520,6 +520,32 @@ func metaTargets(files []string) ([]string, error) {
 	return targets, nil
 }
 
+// RenameRoll renames a roll's folder on disk and returns its new path.
+func (l *Library) RenameRoll(dir, name string) (string, error) {
+	r := l.Roll(dir)
+	if r == nil {
+		return "", errors.New("roll not found")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || safeSegment(name) != name {
+		return "", errors.New(`a folder name can't be empty or contain < > : " / \ | ? * or start or end with a dot`)
+	}
+	if name == r.Name {
+		return dir, nil
+	}
+	from := filepath.FromSlash(dir)
+	to := filepath.Join(filepath.Dir(from), name)
+	if _, err := os.Stat(to); err == nil && !strings.EqualFold(from, to) {
+		return "", fmt.Errorf("%s already exists", name)
+	}
+	if err := os.Rename(from, to); err != nil {
+		return "", err
+	}
+	l.rescanDir(dir) // drops the old path
+	newDir := filepath.ToSlash(to)
+	return newDir, l.rescanDir(newDir)
+}
+
 // Rotate turns a photo clockwise by deg (a multiple of 90) by rewriting its EXIF orientation, or its sidecar's for RAW.
 func (l *Library) Rotate(file string, deg int) (Photo, error) {
 	p, ok := l.Photo(file)
