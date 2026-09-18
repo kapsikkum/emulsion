@@ -85,9 +85,15 @@ func (g *GearDB) Sync() {
 			g.setStatus("Download failed: " + err.Error())
 			return
 		}
-	} else if out, err := db.git(g.Dir, "pull", "--no-rebase", "--no-edit", "--depth", "1"); err != nil {
-		g.setStatus("Update failed: " + firstLine(out, err))
-		return
+	} else {
+		// Nothing in the clone is yours, so take upstream's word for it. A shallow pull can't
+		// merge at all once upstream's history has moved on: the two sides share no commit.
+		for _, args := range [][]string{{"fetch", "--depth", "1", "origin", "HEAD"}, {"reset", "--hard", "FETCH_HEAD"}} {
+			if out, err := db.git(g.Dir, args...); err != nil {
+				g.setStatus("Update failed: " + firstLine(out, err))
+				return
+			}
+		}
 	}
 	g.invalidate()
 	g.updated = time.Now()
