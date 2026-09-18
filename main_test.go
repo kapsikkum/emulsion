@@ -317,3 +317,11 @@ func TestPlanPerRollOverrides(t *testing.T) {
 		t.Error("two rolls in one folder should be refused")
 	}
 }
+
+func TestStripTagsInFolderNames(t *testing.T) {
+	vals := tokens(ImportRequest{Meta: Meta{Film: "Harman RED ISO 125 #ilford", Date: "2026-03-07"}}, "Roll 4", "", "")
+	got, err := folderFor("{film}/{name}", vals)
+	if want := filepath.Join("Harman RED ISO 125", "Roll 4"); err != nil || got != want {
+		t.Fatalf("got %q want %q (%v)", got, want, err)
+	}
+}

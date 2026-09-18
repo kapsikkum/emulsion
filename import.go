@@ -412,7 +412,7 @@ func tokens(req ImportRequest, name, group, date string) map[string]string {
 		date = req.Date
 	}
 	vals := map[string]string{
-		"name": name, "film": req.Film, "make": req.Make, "model": req.Model, "lens": req.Lens, "iso": req.ISO,
+		"name": name, "film": stripTags(req.Film), "make": req.Make, "model": req.Model, "lens": req.Lens, "iso": req.ISO,
 		"camera": strings.TrimSpace(req.Make + " " + req.Model), "date": date, "group": strings.TrimPrefix(path.Base("/"+group), "/"),
 		"source": strings.TrimSuffix(path.Base(filepath.ToSlash(req.Source)), path.Ext(req.Source)),
 		"yyyy":   "", "yy": "", "mm": "", "dd": "",
@@ -424,6 +424,14 @@ func tokens(req ImportRequest, name, group, date string) map[string]string {
 		vals[k] = badChars.ReplaceAllString(v, "-") // a "/" in a film name must not create folders
 	}
 	return vals
+}
+
+var hashTag = regexp.MustCompile(`#\S+`)
+
+// stripTags drops the search hashtags film database names carry ("Harman RED ISO 125 #ilford"),
+// which belong in the metadata, not in a folder name.
+func stripTags(s string) string {
+	return strings.Join(strings.Fields(hashTag.ReplaceAllString(s, " ")), " ")
 }
 
 // folderFor renders the structure template into a relative folder path.
