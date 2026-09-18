@@ -280,7 +280,11 @@ func (a *App) Handler(local bool) http.Handler {
 		if limit == 0 {
 			limit = 200
 		}
-		writeJSON(w, a.gear.Search(r.FormValue("kind"), r.FormValue("q"), a.gearUsage(), limit))
+		q := GearQuery{Kind: r.FormValue("kind"), Q: r.FormValue("q"), Brand: r.FormValue("brand"), Mount: r.FormValue("mount"), Format: r.FormValue("format")}
+		writeJSON(w, a.gear.Search(q, a.gearUsage(), limit))
+	})
+	mux.HandleFunc("GET /api/gear/facets", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, a.gear.Facets(r.FormValue("kind")))
 	})
 	mux.HandleFunc("POST /api/gear", func(w http.ResponseWriter, r *http.Request) {
 		var it GearItem

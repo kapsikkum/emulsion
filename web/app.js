@@ -24,6 +24,21 @@ const enc = encodeURIComponent;
 const thumb = (f, size, o) => `/api/thumb?${size === 'f' ? 's=f&' : size ? 's=l&' : ''}${o > 1 ? `o=${o}&` : ''}f=${enc(f)}`;
 const filmImg = pic => `/filmimg/${enc(pic)}`;
 const img = (src, alt = '') => html`<img class="lazy" loading="lazy" decoding="async" alt="${alt}" src="${src}" onload="this.classList.add('loaded')" onerror="this.classList.add('loaded');this.style.visibility='hidden'">`;
+// searchBox wires a view's search field and puts the cursor back after the redraw replaces it.
+function searchBox(main, take, draw, ms = 160) {
+  const el = $('[data-q]', main);
+  if (!el) return;
+  el.oninput = debounce(async e => {
+    take(e.target.value);
+    await draw();
+    const back = $('[data-q]', main);
+    if (back) {
+      back.focus();
+      back.setSelectionRange(back.value.length, back.value.length);
+    }
+  }, ms);
+}
+
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 const uniq = a => [...new Set(a.filter(Boolean))];

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,6 +27,7 @@ type GearItem struct {
 	Brand      string `json:",omitempty"`
 	Model      string `json:",omitempty"`
 	Mount      string `json:",omitempty"`
+	Format     string `json:",omitempty"` // film it takes: 35mm, 120, APS
 	Type       string `json:",omitempty"` // SLR or DSLR
 	Focal      string `json:",omitempty"`
 	Aperture   string `json:",omitempty"`
@@ -171,11 +173,15 @@ func (g *GearDB) fromRepo() []GearItem {
 				Slug: at(row, "slug"), Kind: kind, Name: at(row, "name"), Mount: at(row, "mount"), Type: at(row, "type"),
 				Focal: at(row, "focal_length_mm"), Aperture: at(row, "max_aperture"), Introduced: at(row, "introduced"),
 				Filter: at(row, "filter_mm"), Weight: at(row, "weight_g"), Wikipedia: at(row, "wikipedia"),
+				Format: at(row, "film_format"),
 			}
 			if it.Slug == "" || it.Name == "" {
 				continue
 			}
 			it.Brand, it.Model = splitBrand(it.Name)
+			if b := at(row, "brand"); b != "" {
+				it.Brand = b // Nikkor lenses are Nikon's, whatever the name says
+			}
 			if img := at(row, "image"); img != "" {
 				it.Image = "/geardb/" + filepath.ToSlash(img)
 			}
@@ -346,15 +352,62 @@ func slugify(s string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-// Search ranks gear by how well it matches the words typed, gear you've used first.
-func (g *GearDB) Search(kind, q string, used map[string]int, limit int) []GearItem {
-	words := strings.Fields(strings.ToLower(q))
-	var out []GearItem
+// GearQuery is what the gear page and the pickers ask for. Empty fields mean anything.
+type GearQuery struct{ Kind, Q, Brand, Mount, Format string }
+
+// mountNames splits a row's mounts and drops the "lens mount" Wikidata suffixes.
+func mountNames(mount string) []string {
+	var out []string
+	for _, part := range strings.Split(mount, ";") {
+		if p := strings.TrimSuffix(strings.TrimSpace(part), " lens mount"); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Facets lists the brands, mounts and film formats one kind of gear actually has, for the filters.
+func (g *GearDB) Facets(kind string) map[string][]string {
+	seen := map[string]map[string]bool{"brands": {}, "mounts": {}, "formats": {}}
 	for _, it := range g.Items() {
 		if kind != "" && it.Kind != kind {
 			continue
 		}
-		hay := strings.ToLower(it.Name + " " + it.Mount)
+		seen["brands"][it.Brand] = true
+		seen["formats"][it.Format] = true
+		for _, m := range mountNames(it.Mount) {
+			seen["mounts"][m] = true
+		}
+	}
+	out := map[string][]string{}
+	for what, set := range seen {
+		delete(set, "")
+		names := slices.Collect(maps.Keys(set))
+		slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+		out[what] = names
+	}
+	return out
+}
+
+// Search ranks gear by how well it matches the words typed, gear you've used first.
+func (g *GearDB) Search(q GearQuery, used map[string]int, limit int) []GearItem {
+	words := strings.Fields(strings.ToLower(q.Q))
+	same := func(a, b string) bool { return strings.EqualFold(a, b) }
+	var out []GearItem
+	for _, it := range g.Items() {
+		if q.Kind != "" && it.Kind != q.Kind {
+			continue
+		}
+		if q.Brand != "" && !same(it.Brand, q.Brand) {
+			continue
+		}
+		if q.Format != "" && !same(it.Format, q.Format) {
+			continue
+		}
+		if q.Mount != "" && !slices.ContainsFunc(mountNames(it.Mount), func(m string) bool { return same(m, q.Mount) }) {
+			continue
+		}
+		hay := strings.ToLower(it.Name + " " + it.Mount + " " + it.Brand)
 		if slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(hay, w) }) {
 			continue
 		}

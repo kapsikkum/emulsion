@@ -12,27 +12,28 @@ func testGear(t *testing.T) *GearDB {
 	dir := filepath.Join(g.Dir, "data", "canon")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "bodies.csv"), []byte(
-		"slug,name,type,mount,introduced,image,wikidata,commons_file,wikipedia,source\n"+
-			"canon-ae-1,Canon AE-1,SLR,Canon FD lens mount,1976,images/canon/canon-ae-1.jpg,Q55674,,,wikidata\n"+
-			"canon-f-1,Canon F-1,SLR,Canon FD lens mount,1971,,Q1,,,wikidata\n"), 0o644)
+		"slug,name,brand,type,mount,film_format,introduced,image,wikidata,commons_file,wikipedia,source\n"+
+			"canon-ae-1,Canon AE-1,Canon,SLR,Canon FD lens mount,35mm,1976,images/canon/canon-ae-1.jpg,Q55674,,,wikidata\n"+
+			"canon-f-1,Canon F-1,Canon,SLR,Canon FD lens mount,35mm,1971,,Q1,,,wikidata\n"+
+			"pentax-67,Pentax 67,Pentax,SLR,Pentax 6x7 lens mount,120,1969,,Q2,,,wikidata\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "lenses.csv"), []byte(
-		"slug,name,mount,focal_length_mm,max_aperture,introduced,filter_mm,weight_g,image,wikidata,commons_file,wikipedia,source\n"+
-			"canon-fd-50mm-f-1-4,Canon FD 50mm f/1.4,Canon FD lens mount,50,1.4,1971,55,370,,,,,wikipedia\n"), 0o644)
+		"slug,name,brand,mount,film_format,focal_length_mm,max_aperture,introduced,filter_mm,weight_g,image,wikidata,commons_file,wikipedia,source\n"+
+			"canon-fd-50mm-f-1-4,Canon FD 50mm f/1.4,Canon,Canon FD lens mount,35mm,50,1.4,1971,55,370,,,,,wikipedia\n"), 0o644)
 	return g
 }
 
 func TestGearReadsDatabase(t *testing.T) {
 	g := testGear(t)
 	items := g.Items()
-	if len(items) != 3 {
+	if len(items) != 4 {
 		t.Fatalf("%+v", items)
 	}
 	ae1 := items[0]
-	if ae1.Name != "Canon AE-1" || ae1.Kind != "body" || ae1.Brand != "Canon" || ae1.Model != "AE-1" ||
+	if ae1.Name != "Canon AE-1" || ae1.Format != "35mm" || ae1.Kind != "body" || ae1.Brand != "Canon" || ae1.Model != "AE-1" ||
 		ae1.Image != "/geardb/images/canon/canon-ae-1.jpg" || ae1.Custom {
 		t.Errorf("%+v", ae1)
 	}
-	if lens := g.Search("lens", "50", nil, 10); len(lens) != 1 || lens[0].Aperture != "1.4" || lens[0].Filter != "55" {
+	if lens := g.Search(GearQuery{Kind: "lens", Q: "50"}, nil, 10); len(lens) != 1 || lens[0].Aperture != "1.4" || lens[0].Filter != "55" {
 		t.Errorf("%+v", lens)
 	}
 }
@@ -45,7 +46,7 @@ func TestGearCustomAdditions(t *testing.T) {
 	if err != nil || own.Slug != "nikon-fm2" || own.Brand != "Nikon" || own.Model != "FM2" || !own.Custom {
 		t.Fatalf("%+v %v", own, err)
 	}
-	if got := g.Search("body", "fm2", nil, 10); len(got) != 1 || !got[0].Custom {
+	if got := g.Search(GearQuery{Kind: "body", Q: "fm2"}, nil, 10); len(got) != 1 || !got[0].Custom {
 		t.Fatalf("custom gear not searchable: %+v", got)
 	}
 
@@ -61,7 +62,7 @@ func TestGearCustomAdditions(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := g.Items()
-	if len(items) != 5 {
+	if len(items) != 6 {
 		t.Fatalf("%d items, expected the edit to replace the original", len(items))
 	}
 	found := false
@@ -104,8 +105,31 @@ func TestGearCustomAdditions(t *testing.T) {
 
 func TestGearSearchPrefersWhatYouUse(t *testing.T) {
 	g := testGear(t)
-	got := g.Search("body", "canon", map[string]int{"canon f-1": 3}, 10)
+	got := g.Search(GearQuery{Kind: "body", Q: "canon"}, map[string]int{"canon f-1": 3}, 10)
 	if len(got) != 2 || got[0].Name != "Canon F-1" || got[0].Rolls != 3 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestGearFilters(t *testing.T) {
+	g := testGear(t)
+	facets := g.Facets("body")
+	if got := facets["brands"]; len(got) != 2 || got[0] != "Canon" || got[1] != "Pentax" {
+		t.Errorf("brands: %q", got)
+	}
+	if got := facets["mounts"]; len(got) != 2 || got[0] != "Canon FD" || got[1] != "Pentax 6x7" {
+		t.Errorf("mounts: %q", got)
+	}
+	if got := facets["formats"]; len(got) != 2 || got[0] != "120" || got[1] != "35mm" {
+		t.Errorf("formats: %q", got)
+	}
+	if got := g.Search(GearQuery{Kind: "body", Format: "120"}, nil, 10); len(got) != 1 || got[0].Name != "Pentax 67" {
+		t.Errorf("filtering by film: %+v", got)
+	}
+	if got := g.Search(GearQuery{Kind: "body", Mount: "Canon FD"}, nil, 10); len(got) != 2 {
+		t.Errorf("filtering by mount: %+v", got)
+	}
+	if got := g.Search(GearQuery{Brand: "pentax"}, nil, 10); len(got) != 1 {
+		t.Errorf("filtering by brand: %+v", got)
 	}
 }

@@ -65,7 +65,7 @@ views.films = async (main, _, __, alive) => {
     $$('[data-tab]', main).forEach(x => x.classList.toggle('on', x === b));
     load(true);
   }));
-  $('[data-q]', main).oninput = debounce(e => { catFilter.q = e.target.value; load(true); }, 180);
+  searchBox(main, v => (catFilter.q = v), () => load(true), 180);
   $('[data-pic]', main).onchange = e => { catFilter.pic = e.target.checked; load(true); };
   more.onclick = () => load(false);
   await load(true);

@@ -99,7 +99,7 @@ views.library = async (main, _, __, alive) => {
       route();
     });
   };
-  $('[data-q]', main).oninput = debounce(e => { libFilter.q = e.target.value; draw(); }, 120);
+  searchBox(main, v => (libFilter.q = v), draw, 120);
   $('[data-film]', main).onchange = e => { libFilter.film = e.target.value; draw(); };
   $('[data-camera]', main).onchange = e => { libFilter.camera = e.target.value; draw(); };
   $('[data-rescan]', main).onclick = guard(async () => { await api('/api/rescan', {}); toast('Rescanning library…'); });

@@ -551,6 +551,7 @@ input[type="date"].input { min-width: 0; }
 .gear-card .box .none { display: grid; place-items: center; width: 100%; height: 100%; color: var(--faint); background: repeating-linear-gradient(135deg, #1b1917 0 12px, #181614 12px 24px); }
 .gear-card .box .none svg { width: 34px; height: 34px; }
 .ac-item.add b { color: var(--accent); }
+.toolbar .pick { width: auto; padding: 6px 10px; font-size: 13px; }
 .gear-photo { display: flex; align-items: center; gap: 12px; }
 .gear-photo img, .gear-photo .none { width: 96px; height: 72px; object-fit: contain; border-radius: 8px; background: #171614; display: grid; place-items: center; color: var(--faint); }
 .gear-photo .none svg { width: 22px; height: 22px; }

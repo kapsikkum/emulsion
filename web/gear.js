@@ -1,10 +1,12 @@
 'use strict';
 // View: camera gear — bodies and lenses from the gear database, plus your own.
 
-const gearFilter = { kind: 'body', q: '' };
+const gearFilter = { kind: 'body', q: '', brand: '', mount: '', format: '' };
+const FILM_FORMATS = ['35mm', '120', '220', '110', '126', '127', 'APS', 'half-frame', 'sheet', 'instant'];
 const gearYears = g => [g.Introduced, g.Mount && g.Mount.replace(/ lens mount$/i, ' mount')].filter(Boolean).join(' · ');
 const lensSpec = g => [g.Focal && `${g.Focal}mm`, g.Aperture && `f/${g.Aperture}`].filter(Boolean).join(' ');
-const gearSpec = g => (g.Kind === 'lens' ? [lensSpec(g), gearYears(g)].filter(Boolean).join(' · ') : gearYears(g));
+const gearSpec = g => (g.Kind === 'lens' ? [lensSpec(g), gearYears(g), g.Format].filter(Boolean).join(' · ')
+  : [gearYears(g), g.Format].filter(Boolean).join(' · '));
 
 const gearCard = g => html`<button class="film gear-card" data-slug="${g.Slug}">
   <div class="box">${g.Image ? img(g.Image, g.Name) : html`<div class="none">${icon(g.Kind === 'lens' ? 'lens' : 'camera')}</div>`}
@@ -14,9 +16,15 @@ const gearCard = g => html`<button class="film gear-card" data-slug="${g.Slug}">
 </button>`;
 
 views.gear = async (main, _, __, alive) => {
+  let facets = { brands: [], mounts: [], formats: [] };
   const draw = async () => {
-    const items = await api(`/api/gear?kind=${gearFilter.kind}&q=${enc(gearFilter.q)}&limit=400`);
+    const { kind, q, brand, mount, format } = gearFilter;
+    const [items, f] = await Promise.all([
+      api(`/api/gear?kind=${kind}&q=${enc(q)}&brand=${enc(brand)}&mount=${enc(mount)}&format=${enc(format)}&limit=600`),
+      api(`/api/gear/facets?kind=${kind}`).catch(() => facets),
+    ]);
     if (!alive()) return;
+    facets = f;
     const yours = items.filter(g => g.Custom).length;
     main.innerHTML = html`${pageHead('Gear', 'Cameras and lenses', html`
         <div class="search">${icon('search')}<input class="input" type="search" placeholder="Search gear" aria-label="Search gear" value="${gearFilter.q}" data-q></div>
@@ -26,15 +34,28 @@ views.gear = async (main, _, __, alive) => {
           <button role="tab" data-kind="body" class="${gearFilter.kind === 'body' ? 'on' : ''}">Cameras</button>
           <button role="tab" data-kind="lens" class="${gearFilter.kind === 'lens' ? 'on' : ''}">Lenses</button>
         </div>
+        ${[['brand', 'All brands', facets.brands], ['mount', 'All mounts', facets.mounts], ['format', 'All film', facets.formats]]
+          .map(([key, label, values]) => html`<select class="input pick" data-f="${key}" aria-label="${label}">
+            <option value="">${label}</option>
+            ${(values || []).map(v => html`<option ${v === gearFilter[key] ? 'selected' : ''}>${v}</option>`)}</select>`)}
+        ${brand || mount || format ? html`<button class="btn sm ghost" data-clear>${icon('x')}Clear</button>` : ''}
         <span class="muted">${plural(items.length, 'item')}${yours ? ` · ${yours} yours` : ''}</span>
         <span class="muted" style="margin-left:auto">${S.state.geardb?.status || ''}</span>
       </div>
       ${items.length ? html`<div class="films">${items.map(gearCard)}</div>`
-        : html`<div class="empty card">${icon('camera', 'big')}<h2>${gearFilter.q ? 'Nothing found' : 'No gear yet'}</h2>
+        : html`<div class="empty card">${icon('camera', 'big')}<h2>${q || brand || mount || format ? 'Nothing found' : 'No gear yet'}</h2>
             <p>${S.state.geardb?.status?.includes('…') ? 'The gear database is still downloading.' : 'Add your camera or lens and it shows up here.'}</p>
             <button class="btn primary" data-add2>${icon('plus')}Add gear</button></div>`}`.s;
-    $('[data-q]', main).oninput = debounce(e => { gearFilter.q = e.target.value; draw(); }, 200);
-    $$('[data-kind]', main).forEach(b => (b.onclick = () => { gearFilter.kind = b.dataset.kind; draw(); }));
+    searchBox(main, v => (gearFilter.q = v), draw, 200);
+    $$('[data-kind]', main).forEach(b => (b.onclick = () => {
+      Object.assign(gearFilter, { kind: b.dataset.kind, brand: '', mount: '', format: '' }); // a lens mount is not a camera mount
+      draw();
+    }));
+    $$('[data-f]', main).forEach(s => (s.onchange = () => { gearFilter[s.dataset.f] = s.value; draw(); }));
+    $('[data-clear]', main)?.addEventListener('click', () => {
+      Object.assign(gearFilter, { brand: '', mount: '', format: '' });
+      draw();
+    });
     $$('[data-add], [data-add2]', main).forEach(b => (b.onclick = () => editGear({ Kind: gearFilter.kind }, draw)));
     $$('[data-slug]', main).forEach(b => (b.onclick = () => editGear(items.find(g => g.Slug === b.dataset.slug), draw)));
   };
@@ -54,7 +75,11 @@ function editGear(item, done) {
         <button type="button" role="radio" aria-checked="${g.Kind === v}" class="${g.Kind === v ? 'on' : ''}" data-kind="${v}" ${isNew ? '' : 'disabled'}>${l}</button>`)}</div>
       <label class="field"><span>Name</span><input class="input" name="Name" value="${g.Name || ''}" placeholder="${g.Kind === 'lens' ? 'Nikkor 50mm f/1.4' : 'Nikon FM2'}" required autofocus>
         <small>Written to your photos as make and model, split at the first space.</small></label>
-      <label class="field"><span>Mount</span><input class="input" name="Mount" value="${g.Mount || ''}" placeholder="Canon FD lens mount"></label>
+      <div class="fields two">
+        <label class="field"><span>Mount</span><input class="input" name="Mount" value="${g.Mount || ''}" placeholder="Canon FD"></label>
+        <label class="field"><span>Film</span><select class="input" name="Format">
+          ${FILM_FORMATS.map(f => html`<option ${f === (g.Format || '35mm') ? 'selected' : ''}>${f}</option>`)}</select></label>
+      </div>
       <div class="fields two">
         <label class="field"><span>${g.Kind === 'lens' ? 'Focal length (mm)' : 'Type'}</span>
           ${g.Kind === 'lens' ? html`<input class="input" name="Focal" value="${g.Focal || ''}" placeholder="50 or 28-70">`
