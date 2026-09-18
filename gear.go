@@ -96,6 +96,9 @@ func (g *GearDB) Sync() {
 				return
 			}
 		}
+		// Replaced photos pile up as unreachable objects, so the clone would grow forever.
+		db.git(g.Dir, "reflog", "expire", "--expire=now", "--all")
+		db.git(g.Dir, "gc", "--prune=now", "--quiet")
 	}
 	g.invalidate()
 	g.updated = time.Now()
