@@ -33,6 +33,7 @@ type App struct {
 	Desktop  bool // running with a native window
 	settings *Store
 	db       *FilmDB
+	gear     *GearDB
 	lib      *Library
 	thumbs   *Thumbs
 	updater  *Updater
@@ -52,6 +53,7 @@ func NewApp(dataDir string, desktop bool) *App {
 		Desktop:  desktop,
 		settings: settings,
 		db:       &FilmDB{Dir: filepath.Join(dataDir, "filmdb")},
+		gear:     NewGearDB(dataDir),
 		lib:      NewLibrary(dataDir, func() []string { return settings.Get().ExportDirs }),
 		thumbs:   NewThumbs(filepath.Join(dataDir, "thumbs")),
 		updater:  NewUpdater(),
@@ -85,8 +87,12 @@ func (a *App) Start() {
 	}()
 	go func() {
 		for {
-			if _, last := a.db.Status(); time.Since(last) >= time.Duration(max(1, a.settings.Get().UpdateHours))*time.Hour {
+			every := time.Duration(max(1, a.settings.Get().UpdateHours)) * time.Hour
+			if _, last := a.db.Status(); time.Since(last) >= every {
 				a.db.Sync()
+			}
+			if _, last := a.gear.Status(); time.Since(last) >= every {
+				a.gear.Sync()
 			}
 			time.Sleep(10 * time.Minute)
 		}
@@ -134,7 +140,6 @@ func (a *App) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) { a.state(w, r, local) })
 	mux.HandleFunc("GET /api/rolls", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.lib.Rolls(false)) })
 	mux.HandleFunc("GET /api/roll", a.roll)
-	mux.HandleFunc("GET /api/gear", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.lib.Gear()) })
 	mux.HandleFunc("POST /api/roll", a.rollSave)
 	mux.HandleFunc("POST /api/roll/rename", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Dir, Name string }
@@ -269,6 +274,73 @@ func (a *App) Handler(local bool) http.Handler {
 			return
 		}
 		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /api/gear", func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.FormValue("limit"))
+		if limit == 0 {
+			limit = 200
+		}
+		writeJSON(w, a.gear.Search(r.FormValue("kind"), r.FormValue("q"), a.gearUsage(), limit))
+	})
+	mux.HandleFunc("POST /api/gear", func(w http.ResponseWriter, r *http.Request) {
+		var it GearItem
+		if err := readJSON(r, &it); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		saved, err := a.gear.Save(it)
+		if err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, saved)
+	})
+	mux.HandleFunc("POST /api/gear/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Slug string }
+		if err := readJSON(r, &req); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		if err := a.gear.Forget(req.Slug); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/gear/photo", func(w http.ResponseWriter, r *http.Request) {
+		slug, name := r.FormValue("slug"), filepath.Base(filepath.FromSlash(r.FormValue("name")))
+		data, err := io.ReadAll(io.LimitReader(r.Body, 12<<20))
+		if err != nil {
+			fail(w, 400, err)
+			return
+		}
+		if err := a.gear.SaveImage(slug, filepath.Ext(name), data); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /api/gear/photo", func(w http.ResponseWriter, r *http.Request) {
+		p := a.gear.ImagePath(r.FormValue("slug"))
+		if p == "" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "private, no-cache")
+		http.ServeFile(w, r, p)
+	})
+	mux.HandleFunc("POST /api/geardb/update", func(w http.ResponseWriter, r *http.Request) {
+		go a.gear.Sync()
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /geardb/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		p, err := a.gear.RepoImage(r.PathValue("path"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "max-age=86400")
+		http.ServeFile(w, r, p)
 	})
 	mux.HandleFunc("GET /api/fs", a.browse)
 	mux.HandleFunc("POST /api/fs/mkdir", func(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +492,8 @@ func (a *App) state(w http.ResponseWriter, r *http.Request, local bool) {
 	out["local"] = local
 	out["library"] = map[string]any{"status": a.lib.Status(), "job": a.lib.Job()}
 	out["filmdb"] = map[string]any{"status": dbStatus, "updated": updated, "edits": a.db.LocalEdits()}
+	gearStatus, gearUpdated := a.gear.Status()
+	out["geardb"] = map[string]any{"status": gearStatus, "updated": gearUpdated, "count": len(a.gear.Items())}
 	out["deps"] = map[string]bool{"git": gitErr == nil, "exiftool": exifErr == nil}
 	out["settings"] = map[string]any{
 		"libraries": s.Libraries, "importTo": s.ImportTo, "updateHours": s.UpdateHours,
@@ -556,6 +630,17 @@ func (it filmItem) rank() int {
 		return 3
 	}
 	return min(it.Avail, 2)
+}
+
+// gearUsage counts the rolls shot with each camera and lens, so the ones you use come first.
+func (a *App) gearUsage() map[string]int {
+	used := map[string]int{}
+	for _, r := range a.lib.Rolls(false) {
+		for _, name := range slices.Concat(r.Cameras, r.Lenses) {
+			used[strings.ToLower(name)]++
+		}
+	}
+	return used
 }
 
 func (a *App) filmUsage() map[string]int {

@@ -34,6 +34,11 @@ the way qBittorrent does. The desktop app can also turn on a password-protected 
 - **Films in production first.** The database marks which films are still on the market, so the Films page has
   an **In production** tab, and searches list current stocks ahead of discontinued variants. Everyday stocks lead
   (Portra, Gold, UltraMax, ColorPlus, HP5, C200…). You can change a film's availability when you edit it.
+- **Gear.** Cameras and lenses come from the
+  [camera gear database](https://github.com/kapsikkum/camera-gear-database) with pictures, so you pick
+  "Canon AE-1" instead of typing a make and model. Anything missing you add yourself, with your own photo;
+  your gear is stored in the data folder and survives every database update. Editing a database entry keeps
+  your version instead, and removing yours brings the original back.
 - **Film database.** The database is a git clone. Your edits are local commits, and updates are
   `git pull` with your edits kept. You can see and revert your edits in Settings.
 - **Updates.** Emulsion checks GitHub daily for a new release and shows it in the sidebar. **Install and restart**
@@ -75,6 +80,8 @@ folder: `%AppData%\Emulsion` on Windows, `~/Library/Application Support/Emulsion
 | Path | What it is |
 | --- | --- |
 | `filmdb/` | Git clone of the Open Source Film Database: `film_database.csv`, box images, and your edits as commits |
+| `geardb/` | Git clone of the camera gear database: camera and lens CSVs with photos |
+| `gear.json`, `gear-images/` | Gear you added or edited yourself, and its photos |
 | `settings.json` | Libraries, import templates, hot folder, app paths, remote-access password hash |
 | `library.json` | Cache of the last photo scan, rebuilt from your files |
 | `imported.json` | Names and sizes of imported source files, used to spot duplicates |

@@ -23,8 +23,10 @@ const ROLL_STYLES = [
   ['folder', 'Folder name as-is', g => g.Folder],
 ];
 
+const cameraFields = name => (name.trim() ? { Make: splitGear(name)[0], Model: splitGear(name)[1] } : { Make: '', Model: '' });
+
 const imp = {
-  rollStyle: 'tidy', rolls: {}, detect: true,
+  rollStyle: 'tidy', rolls: {}, detect: true, Camera: '',
   source: '', src: null, sub: true, selected: new Set(), hideDups: false, uploads: [],
   mode: 'copy', dest: '', structure: null, rename: null, split: false,
   name: '', nameTouched: false, Film: '', ISO: '', Make: '', Model: '', Lens: '', Date: '', after: '',
@@ -32,7 +34,7 @@ const imp = {
 
 views.import = async (main, _, query, alive) => {
   const s = S.state.settings;
-  const [g, apps] = await Promise.all([gear().catch(() => ({ makes: [], models: [], lenses: [] })), api('/api/apps').catch(() => [])]);
+  const apps = await api('/api/apps').catch(() => []);
   if (!alive()) return;
   imp.structure ??= s.structure || '{name}';
   imp.rename ??= s.rename || '';
@@ -223,7 +225,7 @@ views.import = async (main, _, query, alive) => {
     Source: imp.source, Subfolders: imp.sub, Files: [...imp.selected], Mode: imp.mode, Dest: imp.dest,
     Structure: imp.structure, Rename: imp.rename, Split: imp.split && multiGroup(), Detect: imp.detect, Name: imp.name,
     Rolls: imp.split && multiGroup() ? selectedGroups().map(g => ({ Group: g.Group, Name: imp.rolls[g.Group]?.name || '', Film: imp.rolls[g.Group]?.Film || '', ISO: imp.rolls[g.Group]?.ISO || '', Date: imp.rolls[g.Group]?.Date || '' })) : [],
-    Film: imp.Film, ISO: imp.ISO, Make: imp.Make, Model: imp.Model, Lens: imp.Lens, Date: imp.Date, After: imp.after,
+    Film: imp.Film, ISO: imp.ISO, ...cameraFields(imp.Camera), Lens: imp.Lens, Date: imp.Date, After: imp.after,
   });
 
   const drawDest = () => {
@@ -276,13 +278,9 @@ views.import = async (main, _, query, alive) => {
       <div class="fields two">
         <label class="field"><span>ISO</span><input class="input" name="ISO" inputmode="numeric" value="${imp.ISO}"></label>
         <label class="field"><span>Date shot</span><input class="input" type="date" name="Date" value="${imp.Date}"></label>
-        <label class="field"><span>Make</span><input class="input" name="Make" list="imp-makes" value="${imp.Make}" placeholder="Nikon"></label>
-        <label class="field"><span>Model</span><input class="input" name="Model" list="imp-models" value="${imp.Model}" placeholder="FM2"></label>
       </div>
-      <label class="field"><span>Lens</span><input class="input" name="Lens" list="imp-lenses" value="${imp.Lens}"></label>
-      <datalist id="imp-makes">${g.makes.map(m => html`<option value="${m}">`)}</datalist>
-      <datalist id="imp-models">${g.models.map(m => html`<option value="${m}">`)}</datalist>
-      <datalist id="imp-lenses">${g.lenses.map(m => html`<option value="${m}">`)}</datalist>
+      <label class="field"><span>Camera</span><input class="input" name="Camera" value="${imp.Camera}" placeholder="Search your gear"></label>
+      <label class="field"><span>Lens</span><input class="input" name="Lens" value="${imp.Lens}" placeholder="Search your gear"></label>
 
       ${openApps.length ? html`<h2>After import</h2>
         <label class="field"><span>Open in</span><select class="input" name="after"><option value="">Nothing</option>
@@ -300,6 +298,8 @@ views.import = async (main, _, query, alive) => {
       if (refocus.setSelectionRange && refocus.type === 'text') refocus.setSelectionRange(refocus.value.length, refocus.value.length);
     }
     filmPicker(form.Film, f => { imp.Film = f.Name; if (f.ISO) { imp.ISO = f.ISO; form.ISO.value = f.ISO; } plan(); });
+    gearPicker(form.Camera, 'body', g => { imp.Camera = g.Name; plan(); });
+    gearPicker(form.Lens, 'lens', g => { imp.Lens = g.Name; plan(); });
     $$('input[name$="|Film"]', form).forEach(input => {
       const group = input.name.split('|')[1];
       filmPicker(input, f => {
@@ -329,7 +329,7 @@ views.import = async (main, _, query, alive) => {
         return plan();
       }
       if (t.name === 'name') imp.nameTouched = true;
-      if (['dest', 'structure', 'rename', 'name', 'Film', 'ISO', 'Make', 'Model', 'Lens', 'Date', 'after'].includes(t.name)) imp[t.name] = t.value;
+      if (['dest', 'structure', 'rename', 'name', 'Film', 'ISO', 'Camera', 'Lens', 'Date', 'after'].includes(t.name)) imp[t.name] = t.value;
       plan();
     };
     $('[data-go]', form).onclick = go;

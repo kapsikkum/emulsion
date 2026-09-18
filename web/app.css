@@ -543,3 +543,14 @@ input[type="date"].input { min-width: 0; }
 .avail svg { width: 11px; height: 11px; }
 .avail.current { background: rgba(127, 212, 157, .14); color: var(--ok); }
 .film .box .avail-dot { position: absolute; left: 9px; top: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #f1ece5; }
+
+/* ---------- gear ---------- */
+.gear-card { border: 1px solid var(--line); text-align: left; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.gear-card .box { background: #171614; }
+.gear-card .box img { mix-blend-mode: normal; }
+.gear-card .box .none { display: grid; place-items: center; width: 100%; height: 100%; color: var(--faint); background: repeating-linear-gradient(135deg, #1b1917 0 12px, #181614 12px 24px); }
+.gear-card .box .none svg { width: 34px; height: 34px; }
+.ac-item.add b { color: var(--accent); }
+.gear-photo { display: flex; align-items: center; gap: 12px; }
+.gear-photo img, .gear-photo .none { width: 96px; height: 72px; object-fit: contain; border-radius: 8px; background: #171614; display: grid; place-items: center; color: var(--faint); }
+.gear-photo .none svg { width: 22px; height: 22px; }

@@ -604,19 +604,3 @@ func (l *Library) fileKeys() map[string]bool {
 func fileKey(name string, size int64) string {
 	return fmt.Sprintf("%s|%d", strings.ToLower(name), size)
 }
-
-// Gear lists makes, models and lenses already used, for form suggestions.
-func (l *Library) Gear() map[string][]string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	g := map[string][]string{"makes": {}, "models": {}, "lenses": {}}
-	for _, p := range l.photos {
-		g["makes"] = addUniq(g["makes"], string(p.Make))
-		g["models"] = addUniq(g["models"], string(p.Model))
-		g["lenses"] = addUniq(g["lenses"], string(p.LensModel))
-	}
-	for _, v := range g {
-		sort.Strings(v)
-	}
-	return g
-}

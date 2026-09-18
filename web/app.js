@@ -85,7 +85,7 @@ const icon = (name, cls = '') => raw(`<svg class="${cls}" viewBox="0 0 24 24" fi
 const LOGO = raw('<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb35c"/><stop offset="1" stop-color="#ff6a13"/></linearGradient></defs><circle cx="32" cy="34" r="24" fill="url(#lg)"/><circle cx="32" cy="34" r="15" fill="#0f0d0c"/><circle cx="32" cy="34" r="6" fill="url(#lg)"/><rect x="28" y="2" width="8" height="10" rx="2.5" fill="url(#lg)"/></svg>');
 
 // ---------- state & api ----------
-const S = { state: null, rolls: null, gear: null, route: '', scroll: {}, onState: null, token: 0 };
+const S = { state: null, rolls: null, route: '', scroll: {}, onState: null, token: 0 };
 const views = {};
 
 async function api(path, body) {
@@ -120,10 +120,7 @@ async function refreshState() {
   const lib = S.state.library;
   const scanDone = prevLib && prevLib !== lib.status && !lib.status.startsWith('Scanning');
   const jobDone = prevJob?.Running && !lib.job.Running;
-  if (scanDone || jobDone) {
-    S.rolls = null;
-    S.gear = null;
-  }
+  if (scanDone || jobDone) S.rolls = null;
   if (jobDone) toast(lib.job.Error ? `${lib.job.Message}: ${lib.job.Error}` : lib.job.Message, !!lib.job.Error);
   S.onState?.({ scanDone, jobDone });
 }
@@ -132,15 +129,11 @@ async function rolls(force) {
   if (!S.rolls || force) S.rolls = await api('/api/rolls');
   return S.rolls;
 }
-async function gear() {
-  if (!S.gear) S.gear = await api('/api/gear');
-  return S.gear;
-}
-
 // ---------- shell ----------
 const NAV = [
   ['library', '#/', 'Library', 'grid'],
   ['films', '#/films', 'Films', 'film'],
+  ['gear', '#/gear', 'Gear', 'camera'],
   ['import', '#/import', 'Import', 'import'],
   ['settings', '#/settings', 'Settings', 'settings'],
 ];
@@ -188,6 +181,7 @@ function route() {
   const [name, ...rest] = pathPart.split('/');
   const view = views[name || 'library'] ? name || 'library' : 'library';
   $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === (view === 'roll' ? 'library' : view === 'film' ? 'films' : view)));
+  document.title = view === 'library' ? 'Emulsion' : `${view[0].toUpperCase()}${view.slice(1)} · Emulsion`;
   S.route = hash;
   S.onState = null;
   const token = ++S.token;

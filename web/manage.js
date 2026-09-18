@@ -76,6 +76,18 @@ views.settings = async (main, _, __, alive) => {
 
       <section class="card">
         <div class="section">
+          <h2>Gear database</h2><p class="muted">Cameras and lenses from the
+            <a href="https://github.com/kapsikkum/camera-gear-database" target="_blank" rel="noopener" style="text-decoration:underline">camera gear database</a>,
+            with pictures. Gear you add yourself is kept separately and is never touched by an update.</p>
+          <dl class="kv"><dt>Status</dt><dd>${st.geardb?.status || '—'}</dd><dt>Models</dt><dd>${(st.geardb?.count || 0).toLocaleString()}</dd>
+            <dt>Last checked</dt><dd>${ago(st.geardb?.updated)}</dd></dl>
+          <div class="row" style="margin-top:14px"><button class="btn" data-gearupdate>${icon('refresh')}Check for updates</button>
+            <a class="btn ghost" href="#/gear">${icon('camera')}Your gear</a></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section">
           <h2>Film database</h2><p class="muted">A local copy of the <a href="https://github.com/dxdatabase/Open-source-film-database" target="_blank" rel="noopener" style="text-decoration:underline">Open Source Film Database</a> (CC BY-SA 4.0). Your edits are kept as local changes and win if the same film changes upstream.</p>
           <dl class="kv"><dt>Status</dt><dd data-dbstatus>${db.status || '—'}</dd><dt>Last checked</dt><dd>${ago(db.updated)}</dd>
             <dt>Check every</dt><dd><select class="input" style="width:auto;height:32px" data-hours>${[6, 12, 24, 72, 168].map(h => html`<option value="${h}" ${h === s.updateHours ? 'selected' : ''}>${h < 24 ? `${h} hours` : h === 24 ? 'day' : h === 168 ? 'week' : `${h / 24} days`}</option>`)}</select></dd></dl>
@@ -173,6 +185,7 @@ views.settings = async (main, _, __, alive) => {
 
   $('[data-hours]', main).onchange = e => save({ UpdateHours: +e.target.value }, 'Saved');
   $('[data-update]', main).onclick = guard(async () => { await api('/api/filmdb/update', {}); toast('Checking for film database updates…'); });
+  $('[data-gearupdate]', main).onclick = guard(async () => { await api('/api/geardb/update', {}); toast('Checking for gear database updates…'); });
   $$('[data-revert]', main).forEach(b => (b.onclick = guard(async () => {
     if (!confirm('Undo this edit? The film goes back to its previous version.')) return;
     await api('/api/filmdb/revert', { Hash: b.dataset.revert });

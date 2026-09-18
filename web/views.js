@@ -157,6 +157,12 @@ async function welcome(main, alive) {
 // ---------- roll ----------
 const rollView = { tab: 'positives' };
 
+// splitGear turns "Canon AE-1" into the make and model EXIF wants.
+const splitGear = name => {
+  const [make, ...rest] = name.trim().split(/\s+/);
+  return [make, rest.join(' ') || make];
+};
+
 views.roll = async (main, [dir], _, alive) => {
   const [r, apps] = await Promise.all([api('/api/roll?dir=' + enc(dir)), S.state.local ? api('/api/apps').catch(() => []) : []]);
   r.Frames ||= [];
@@ -275,10 +281,8 @@ function renameRoll(r) {
 }
 
 async function editRoll(r) {
-  const g = await gear().catch(() => ({ makes: [], models: [], lenses: [] }));
   const one = a => (a.length === 1 ? a[0] : '');
   const all = [...(r.Frames || []), ...(r.Exports || [])];
-  const makes = uniq(all.map(f => f.Make)), models = uniq(all.map(f => f.Model));
   const dates = uniq(all.map(f => (f.DateTimeOriginal || '').slice(0, 10)));
   const { box, close } = layer(html`<header><h2>Edit roll</h2><button class="btn ghost icon" data-close aria-label="Close">${icon('x')}</button></header>
     <form class="body" id="rollform">
@@ -286,23 +290,25 @@ async function editRoll(r) {
       <div class="fields two">
         <label class="field"><span>ISO</span><input class="input" name="ISO" inputmode="numeric" value="${one(r.ISO)}" placeholder="${r.ISO.length > 1 ? 'Mixed' : ''}"></label>
         <label class="field"><span>Date shot</span><input class="input" type="date" name="Date" value="${one(dates)}"></label>
-        <label class="field"><span>Camera make</span><input class="input" name="Make" list="dl-makes" value="${one(makes)}" placeholder="${makes.length > 1 ? 'Mixed' : 'e.g. Nikon'}"></label>
-        <label class="field"><span>Camera model</span><input class="input" name="Model" list="dl-models" value="${one(models)}" placeholder="${models.length > 1 ? 'Mixed' : 'e.g. FM2'}"></label>
       </div>
-      <label class="field"><span>Lens</span><input class="input" name="Lens" list="dl-lenses" value="${one(r.Lenses)}" placeholder="${r.Lenses.length > 1 ? 'Mixed' : 'e.g. Nikkor 50mm f/1.4'}"></label>
+      <label class="field"><span>Camera</span><input class="input" name="Camera" value="${one(r.Cameras)}" placeholder="${r.Cameras.length > 1 ? 'Mixed' : 'Search your gear, e.g. Canon AE-1'}"></label>
+      <label class="field"><span>Lens</span><input class="input" name="Lens" value="${one(r.Lenses)}" placeholder="${r.Lenses.length > 1 ? 'Mixed' : 'Search your gear, e.g. Canon FD 50mm f/1.4'}"></label>
       <div class="note">Written into all ${plural(all.length, 'file')} as EXIF/XMP, so other photo apps see it too. Unchanged fields are left alone.</div>
-      <datalist id="dl-makes">${g.makes.map(m => html`<option value="${m}">`)}</datalist>
-      <datalist id="dl-models">${g.models.map(m => html`<option value="${m}">`)}</datalist>
-      <datalist id="dl-lenses">${g.lenses.map(m => html`<option value="${m}">`)}</datalist>
     </form>
     <footer><button class="btn" data-close>Cancel</button><button class="btn primary" form="rollform">${icon('check')}Write metadata</button></footer>`, 'drawer');
   const form = $('form', box);
   const initial = Object.fromEntries(new FormData(form));
   filmPicker(form.Film, f => { if (f.ISO) form.ISO.value = f.ISO; });
+  gearPicker(form.Camera, 'body');
+  gearPicker(form.Lens, 'lens');
   form.onsubmit = guard(async e => {
     e.preventDefault();
     const now = Object.fromEntries(new FormData(form));
     const changed = Object.fromEntries(Object.entries(now).filter(([k, v]) => v.trim() !== (initial[k] || '').trim() && v.trim() !== ''));
+    if (changed.Camera) { // photos store the make and model separately
+      [changed.Make, changed.Model] = splitGear(changed.Camera);
+      delete changed.Camera;
+    }
     if (!Object.keys(changed).length) return close();
     const btn = $('footer .primary', box);
     btn.disabled = true;
@@ -310,7 +316,6 @@ async function editRoll(r) {
     try {
       await api('/api/roll', { Dir: r.Dir, ...changed });
       S.rolls = null;
-      S.gear = null;
       close();
       toast(`Updated ${plural(all.length, 'file')}`);
       route();
